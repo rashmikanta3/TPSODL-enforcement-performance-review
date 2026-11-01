@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}VCR Master Bulk Ingestion Desk - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3 align-items-center">
+    <div class="col-md-8">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-file-invoice text-primary me-2"></i>VCR Master Bulk Upload Desk
+        </h4>
+        <small class="text-muted">Upload bulk Verification & Confiscation Records (VCRs) via official Excel spreadsheet. Automatic deduplication and circle mapping.</small>
+    </div>
+    <div class="col-md-4 text-md-end mt-2 mt-md-0">
+        <button type="button" class="btn btn-outline-success btn-sm px-3 shadow-sm" onclick="downloadVCRTemplate()">
+            <i class="fa-solid fa-file-excel me-1 text-success"></i> Download VCR Template (.xlsx)
+        </button>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-8 col-xl-7">
+        <!-- Upload Card -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 border-bottom d-flex align-items-center justify-content-between">
+                <h6 class="fw-bold mb-0 text-dark">
+                    <i class="fa-solid fa-cloud-arrow-up text-primary me-2"></i>Ingest VCR Spreadsheet
+                </h6>
+                <span class="badge bg-light text-muted border px-2 py-1 small">
+                    <i class="fa-solid fa-file-circle-check me-1"></i>.XLSX / .XLSM
+                </span>
+            </div>
+            <div class="card-body p-4">
+                <form id="vcrUploadForm" onsubmit="uploadVCRBulk(event)">
+                    <!-- Drag and Drop Dropzone -->
+                    <div id="vcrDropzone" class="border border-2 border-dashed rounded-3 p-4 text-center mb-3 bg-light" style="cursor: pointer; transition: all 0.2s ease;">
+                        <i class="fa-solid fa-file-excel text-success display-4 mb-2"></i>
+                        <h6 class="fw-bold text-dark mb-1">Drag & Drop VCR Spreadsheet Here</h6>
+                        <p class="text-muted small mb-2">or click anywhere in this box to browse from your computer</p>
+                        <input type="file" id="vcrBulkFile" class="d-none" accept=".xlsx, .xlsm">
+                        <span class="badge bg-white text-secondary border px-3 py-1 shadow-sm small" id="selectedFileBadge">
+                            <i class="fa-solid fa-folder-open me-1"></i>No file selected yet
+                        </span>
+                    </div>
+
+                    <!-- Column Requirements Helper -->
+                    <div class="alert alert-light border small text-muted py-2 px-3 rounded-3 mb-3">
+                        <i class="fa-solid fa-circle-info text-primary me-1"></i>
+                        <strong>Expected Columns:</strong> <code>VCR Number</code> (Mandatory), <code>Consumer Name</code>, <code>Consumer Address</code>, <code>Circle</code>, <code>Division</code>, <code>Section</code>, <code>Provisional Bill Date</code>.
+                    </div>
+
+                    <!-- Action Button -->
+                    <button type="submit" id="btnUploadVCR" class="btn btn-primary w-100 py-2 fw-semibold shadow-sm">
+                        <i class="fa-solid fa-upload me-1"></i> Ingest VCR Master Records
+                    </button>
+                </form>
+
+                <!-- Feedback / Result Summary Card -->
+                <div id="vcrResultCard" class="card border rounded-3 mt-4" style="display: none;">
+                    <div class="card-body p-3">
+                        <div class="d-flex align-items-center mb-3">
+                            <i class="fa-solid fa-circle-check text-success fs-3 me-2"></i>
+                            <div>
+                                <h6 class="fw-bold mb-0 text-dark" id="vcrResultTitle">Ingestion Complete</h6>
+                                <small class="text-muted" id="vcrResultSubtitle">Spreadsheet processed successfully</small>
+                            </div>
+                        </div>
+
+                        <!-- Statistics Counter Badges -->
+                        <div class="row g-2 text-center mb-2">
+                            <div class="col-4">
+                                <div class="p-2 border rounded-3 bg-light">
+                                    <div class="text-muted small fw-semibold">Total Rows</div>
+                                    <div class="fs-5 fw-bold text-dark" id="statTotalRows">0</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-2 border rounded-3 bg-success-subtle border-success-subtle">
+                                    <div class="text-success small fw-semibold">Inserted</div>
+                                    <div class="fs-5 fw-bold text-success" id="statInserted">0</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-2 border rounded-3 bg-warning-subtle border-warning-subtle">
+                                    <div class="text-warning-emphasis small fw-semibold">Skipped Dups</div>
+                                    <div class="fs-5 fw-bold text-warning-emphasis" id="statSkipped">0</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Detailed Skipped Log Collapse -->
+                        <div id="vcrSkippedLogContainer" style="display: none;" class="mt-3">
+                            <button class="btn btn-outline-secondary btn-sm w-100 text-start py-1" type="button" data-bs-toggle="collapse" data-bs-target="#vcrSkippedDetails">
+                                <i class="fa-solid fa-list-ul me-1"></i> View Skipped Rows & Reasons
+                            </button>
+                            <div class="collapse mt-2" id="vcrSkippedDetails">
+                                <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                                    <table class="table table-sm table-bordered mb-0" style="font-size: 0.75rem;">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Row</th>
+                                                <th>VCR Number</th>
+                                                <th>Reason</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="vcrSkippedTbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/vcr.js"></script>
+{% endblock %}
+

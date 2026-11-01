@@ -1,0 +1,690 @@
+{% extends "base.html" %}
+
+{% block title %}Master Administration - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3 align-items-center">
+    <div class="col-12">
+        <div class="d-flex align-items-center justify-content-between">
+            <div>
+                <h4 class="fw-bold mb-1 text-dark">
+                    <i class="fa-solid fa-shield-halved text-primary me-2"></i>Master Administration & Configuration
+                </h4>
+                <small class="text-muted">Manage enforcement squads, TPSODL officers, contractor manpower, and user access</small>
+            </div>
+            <span class="badge bg-danger px-3 py-2 fs-6">
+                <i class="fa-solid fa-lock me-1"></i> ADMIN ONLY
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Navigation Tabs -->
+<ul class="nav nav-pills mb-4 bg-white p-2 rounded-3 shadow-sm border" id="adminTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active fw-semibold" id="btnTabTeams" data-bs-toggle="pill" data-bs-target="#teamsTab" type="button" role="tab">
+            <i class="fa-solid fa-users me-1"></i> 1. Squads (Teams)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-semibold" id="btnTabTeamLeads" data-bs-toggle="pill" data-bs-target="#teamLeadsTab" type="button" role="tab">
+            <i class="fa-solid fa-user-shield me-1"></i> 2. TPSODL Team Leaders
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-semibold" id="btnTabEmployees" data-bs-toggle="pill" data-bs-target="#employeesTab" type="button" role="tab">
+            <i class="fa-solid fa-id-card-clip me-1"></i> 3. BA Staff (Contractor)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-semibold" id="btnTabUsers" data-bs-toggle="pill" data-bs-target="#usersTab" type="button" role="tab">
+            <i class="fa-solid fa-user-lock me-1"></i> 4. Portal Users & Access
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="adminTabsContent">
+    <!-- ========================================================================= -->
+    <!-- TAB 1: SQUADS (TEAMS) MANAGEMENT -->
+    <!-- ========================================================================= -->
+    <div class="tab-pane fade show active" id="teamsTab" role="tabpanel">
+        <div class="row g-4">
+            <!-- Create Squad Form -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom">
+                        <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-plus-circle text-primary me-2"></i>Create New Squad</h6>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="createTeamForm" onsubmit="createTeam(event)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Squad / Team Name <span class="text-danger">*</span></label>
+                                <input type="text" id="tmName" class="form-control form-control-sm" placeholder="e.g. SQUAD ALPHA" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                                <select id="tmCircle" class="form-select form-select-sm" required onchange="filterTLOptionsByCircle(this.value, 'tmDefaultTLSelect')">
+                                    <option value="BERHAMPUR">BERHAMPUR</option>
+                                    <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                    <option value="ASKA">ASKA</option>
+                                    <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                    <option value="JEYPORE">JEYPORE</option>
+                                    <option value="RAYAGADA">RAYAGADA</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Supervisor Name <span class="text-danger">*</span></label>
+                                <input type="text" id="tmSupervisor" class="form-control form-control-sm" placeholder="e.g. Er. P. K. Nayak" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Designated TPSODL Team Leader</label>
+                                <select id="tmDefaultTLSelect" class="form-select form-select-sm">
+                                    <option value="">-- Select Permanent TL --</option>
+                                </select>
+                                <input type="hidden" id="tmAssignedTL">
+                                <small class="text-muted" style="font-size: 0.72rem;">Permanent TPSODL officer leading this squad</small>
+                            </div>
+                            <div class="mb-3 form-check bg-light p-2 rounded border">
+                                <input class="form-check-input ms-0 me-2" type="checkbox" id="tmIsOfficeTeam">
+                                <label class="form-check-label small fw-bold text-dark" for="tmIsOfficeTeam">
+                                    🏢 Office Team (Without Vehicle)
+                                </label>
+                                <div class="text-muted small" style="font-size: 0.72rem;">
+                                    Administrative / MIS duty only. Excluded from field performance attribution and vehicle logbook entries.
+                                </div>
+                            </div>
+                            <button type="submit" id="btnCreateTeam" class="btn btn-primary btn-sm w-100 py-2 fw-semibold">
+                                <i class="fa-solid fa-save me-1"></i> Register Squad
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Teams Data Table -->
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-list text-primary me-2"></i>Squad Master Index</h6>
+                            <small class="text-muted">Live status & quick details edit</small>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadAllTeams()">
+                            <i class="fa-solid fa-rotate-right me-1"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Squad Name</th>
+                                    <th>Circle</th>
+                                    <th>Supervisor</th>
+                                    <th>Designated TL</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teamsTableBody">
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading squads...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 2: TPSODL TEAM LEADERS (REGULAR OFFICERS) -->
+    <!-- ========================================================================= -->
+    <div class="tab-pane fade" id="teamLeadsTab" role="tabpanel">
+        <div class="row g-4">
+            <!-- Register Team Lead Form -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom">
+                        <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-primary me-2"></i>Register TPSODL Officer</h6>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="createTeamLeadForm" onsubmit="createTeamLead(event)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Officer / TL Code <span class="text-danger">*</span></label>
+                                <input type="text" id="tlCode" class="form-control form-control-sm" placeholder="e.g. TL-101 or 522703" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Officer Full Name <span class="text-danger">*</span></label>
+                                <input type="text" id="tlName" class="form-control form-control-sm" placeholder="e.g. Er. Sunil Kumar Nayak" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Designation</label>
+                                <input type="text" id="tlDesig" class="form-control form-control-sm" placeholder="e.g. Assistant Executive Engineer / Manager">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                                <select id="tlCircle" class="form-select form-select-sm" required>
+                                    <option value="BERHAMPUR">BERHAMPUR</option>
+                                    <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                    <option value="ASKA">ASKA</option>
+                                    <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                    <option value="JEYPORE">JEYPORE</option>
+                                    <option value="RAYAGADA">RAYAGADA</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Contact Number</label>
+                                <input type="text" id="tlContact" class="form-control form-control-sm" placeholder="e.g. 9437012345">
+                            </div>
+                            <button type="submit" id="btnCreateTL" class="btn btn-primary btn-sm w-100 py-2 fw-semibold">
+                                <i class="fa-solid fa-user-shield me-1"></i> Register Team Leader
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Leads Data Table -->
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-users-gear text-primary me-2"></i>TPSODL Team Leaders Directory</h6>
+                            <small class="text-muted">Permanent company officers leading squads</small>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <select id="filterTLCircle" class="form-select form-select-sm" onchange="loadAllTeamLeads(this.value)">
+                                <option value="">All Circles</option>
+                                <option value="BERHAMPUR">BERHAMPUR</option>
+                                <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                <option value="ASKA">ASKA</option>
+                                <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                <option value="JEYPORE">JEYPORE</option>
+                                <option value="RAYAGADA">RAYAGADA</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap" onclick="loadAllTeamLeads(document.getElementById('filterTLCircle').value)">
+                                <i class="fa-solid fa-rotate-right me-1"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>TL Code</th>
+                                    <th>Officer Name</th>
+                                    <th>Designation</th>
+                                    <th>Circle</th>
+                                    <th>Contact</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teamLeadsTableBody">
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading team leaders...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 3: BA CONTRACTOR EMPLOYEES DIRECTORY -->
+    <!-- ========================================================================= -->
+    <div class="tab-pane fade" id="employeesTab" role="tabpanel">
+        <div class="row g-4">
+            <!-- Register Employee Form -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom">
+                        <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-user-plus text-primary me-2"></i>Register BA Personnel</h6>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="createEmployeeForm" onsubmit="createEmployee(event)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Employee Code <span class="text-danger">*</span></label>
+                                <input type="text" id="empCode" class="form-control form-control-sm" placeholder="e.g. EMP-BA-101" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Full Name <span class="text-danger">*</span></label>
+                                <input type="text" id="empName" class="form-control form-control-sm" placeholder="e.g. Rajesh Kumar Das" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Designation</label>
+                                <input type="text" id="empDesig" class="form-control form-control-sm" placeholder="e.g. Lineman (BA) / Helper (BA)">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                                <select id="empCircle" class="form-select form-select-sm" required onchange="filterSquadOptionsByCircle(this.value, 'empTeamSelect')">
+                                    <option value="BERHAMPUR">BERHAMPUR</option>
+                                    <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                    <option value="ASKA">ASKA</option>
+                                    <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                    <option value="JEYPORE">JEYPORE</option>
+                                    <option value="RAYAGADA">RAYAGADA</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Assign to Squad</label>
+                                <select id="empTeamSelect" class="form-select form-select-sm">
+                                    <option value="">-- Unassigned / Individual --</option>
+                                </select>
+                            </div>
+                            <button type="submit" id="btnCreateEmp" class="btn btn-primary btn-sm w-100 py-2 fw-semibold">
+                                <i class="fa-solid fa-user-check me-1"></i> Register BA Personnel
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Employees Data Table -->
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-users-gear text-primary me-2"></i>BA Contractor Manpower Directory</h6>
+                            <small class="text-muted">Attendance (Form D) is recorded strictly for these personnel</small>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <select id="filterEmpCircle" class="form-select form-select-sm" onchange="loadAllEmployees(this.value)">
+                                <option value="">All Circles</option>
+                                <option value="BERHAMPUR">BERHAMPUR</option>
+                                <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                <option value="ASKA">ASKA</option>
+                                <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                <option value="JEYPORE">JEYPORE</option>
+                                <option value="RAYAGADA">RAYAGADA</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap" onclick="loadAllEmployees(document.getElementById('filterEmpCircle').value)">
+                                <i class="fa-solid fa-rotate-right me-1"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Code</th>
+                                    <th>Full Name</th>
+                                    <th>Designation</th>
+                                    <th>Circle</th>
+                                    <th>Squad Team</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employeesTableBody">
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading personnel...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 4: PORTAL USERS & RBAC -->
+    <!-- ========================================================================= -->
+    <div class="tab-pane fade" id="usersTab" role="tabpanel">
+        <div class="row g-4">
+            <!-- Create User Form -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom">
+                        <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-primary me-2"></i>Create User Account</h6>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="createUserForm" onsubmit="createUser(event)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Username <span class="text-danger">*</span></label>
+                                <input type="text" id="usrName" class="form-control form-control-sm" placeholder="e.g. aska_admin" required autocomplete="off">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Password <span class="text-danger">*</span></label>
+                                <input type="text" id="usrPass" class="form-control form-control-sm" placeholder="password" required autocomplete="off">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Role <span class="text-danger">*</span></label>
+                                <select id="usrRole" class="form-select form-select-sm" required onchange="handleUserRoleChange(this.value)">
+                                    <option value="USER">USER (Field Operator)</option>
+                                    <option value="SUB_ADMIN">SUB_ADMIN (Circle Officer)</option>
+                                    <option value="ADMIN">ADMIN (Full Master Control)</option>
+                                </select>
+                            </div>
+                            <div class="mb-3" id="usrCircleGroup">
+                                <label class="form-label small fw-bold d-flex justify-content-between align-items-center">
+                                    <span>Assigned Circle(s) <span class="text-danger">*</span></span>
+                                    <small class="text-muted fw-normal">Select one or more</small>
+                                </label>
+                                <div class="border rounded p-2 bg-light" style="max-height: 155px; overflow-y: auto;">
+                                    <div class="form-check form-check-sm mb-1">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="JEYPORE" id="circle_jeypore">
+                                        <label class="form-check-label small" for="circle_jeypore">JEYPORE</label>
+                                    </div>
+                                    <div class="form-check form-check-sm mb-1">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="RAYAGADA" id="circle_rayagada">
+                                        <label class="form-check-label small" for="circle_rayagada">RAYAGADA</label>
+                                    </div>
+                                    <div class="form-check form-check-sm mb-1">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="BHANJANAGAR" id="circle_bhanjanagar">
+                                        <label class="form-check-label small" for="circle_bhanjanagar">BHANJANAGAR</label>
+                                    </div>
+                                    <div class="form-check form-check-sm mb-1">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="ASKA" id="circle_aska">
+                                        <label class="form-check-label small" for="circle_aska">ASKA</label>
+                                    </div>
+                                    <div class="form-check form-check-sm mb-1">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="BERHAMPUR" id="circle_berhampur">
+                                        <label class="form-check-label small" for="circle_berhampur">BERHAMPUR</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input usr-circle-check" type="checkbox" value="BERHAMPUR CITY" id="circle_city">
+                                        <label class="form-check-label small" for="circle_city">BERHAMPUR CITY</label>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="usrCircle" name="circle">
+                            </div>
+                            <div class="form-check form-switch mb-3" id="usrCanEditGroup">
+                                <input class="form-check-input" type="checkbox" id="usrCanEdit">
+                                <label class="form-check-label small fw-bold text-dark" for="usrCanEdit">Grant Edit / Modify Rights</label>
+                                <small class="text-muted d-block" style="font-size: 0.72rem;">Unchecked = View-Only profile</small>
+                            </div>
+                            <button type="submit" id="btnCreateUser" class="btn btn-primary btn-sm w-100 py-2 fw-semibold">
+                                <i class="fa-solid fa-user-plus me-1"></i> Create Account
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Portal Users Data Table -->
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-users text-primary me-2"></i>Portal User Accounts</h6>
+                            <small class="text-muted">Manage roles, circle scopes, and login activation</small>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadAllUsers()">
+                            <i class="fa-solid fa-rotate-right me-1"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Role</th>
+                                    <th>Circle</th>
+                                    <th>Edit Rights</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <tr><td colspan="6" class="text-center text-muted py-3">Loading users...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- EDIT MODALS -->
+<!-- ========================================================================= -->
+
+<!-- 1. Edit Team Modal -->
+<div class="modal fade" id="editTeamModal" tabindex="-1" aria-labelledby="editTeamModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="editTeamModalLabel"><i class="fa-solid fa-pen-to-square me-2"></i>Edit Squad Team</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form onsubmit="submitEditTeam(event)">
+                <div class="modal-body p-3">
+                    <input type="hidden" id="editTeamId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Squad Name <span class="text-danger">*</span></label>
+                        <input type="text" id="editTeamName" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                        <select id="editTeamCircle" class="form-select form-select-sm" required onchange="filterTLOptionsByCircle(this.value, 'editTeamDefaultTLSelect')">
+                            <option value="BERHAMPUR">BERHAMPUR</option>
+                            <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                            <option value="ASKA">ASKA</option>
+                            <option value="BHANJANAGAR">BHANJANAGAR</option>
+                            <option value="JEYPORE">JEYPORE</option>
+                            <option value="RAYAGADA">RAYAGADA</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Supervisor Name <span class="text-danger">*</span></label>
+                        <input type="text" id="editTeamSupervisor" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Designated TPSODL Team Leader</label>
+                        <select id="editTeamDefaultTLSelect" class="form-select form-select-sm">
+                            <option value="">-- Select Permanent TL --</option>
+                        </select>
+                        <input type="hidden" id="editTeamAssignedTL">
+                    </div>
+                    <div class="mb-3 form-check bg-light p-2 rounded border">
+                        <input class="form-check-input ms-0 me-2" type="checkbox" id="editTeamIsOfficeTeam">
+                        <label class="form-check-label small fw-bold text-dark" for="editTeamIsOfficeTeam">
+                            🏢 Office Team (Without Vehicle)
+                        </label>
+                        <div class="text-muted small" style="font-size: 0.72rem;">
+                            No vehicle assigned. Excluded from field bookings, collections, DCs, and log runs.
+                        </div>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="editTeamIsActive">
+                        <label class="form-check-label small fw-bold text-dark" for="editTeamIsActive">Squad Active Status</label>
+                    </div>
+                </div>
+                <div class="modal-footer py-2 bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" id="btnSaveEditTeam" class="btn btn-primary btn-sm px-3 fw-semibold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Edit Team Leader Modal -->
+<div class="modal fade" id="editTeamLeadModal" tabindex="-1" aria-labelledby="editTeamLeadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="editTeamLeadModalLabel"><i class="fa-solid fa-pen-to-square me-2"></i>Edit TPSODL Officer Details</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form onsubmit="submitEditTeamLead(event)">
+                <div class="modal-body p-3">
+                    <input type="hidden" id="editTLId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Officer / TL Code <span class="text-danger">*</span></label>
+                        <input type="text" id="editTLCode" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Officer Full Name <span class="text-danger">*</span></label>
+                        <input type="text" id="editTLName" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Designation</label>
+                        <input type="text" id="editTLDesignation" class="form-control form-control-sm">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                        <select id="editTLCircle" class="form-select form-select-sm" required>
+                            <option value="BERHAMPUR">BERHAMPUR</option>
+                            <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                            <option value="ASKA">ASKA</option>
+                            <option value="BHANJANAGAR">BHANJANAGAR</option>
+                            <option value="JEYPORE">JEYPORE</option>
+                            <option value="RAYAGADA">RAYAGADA</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Contact Number</label>
+                        <input type="text" id="editTLContact" class="form-control form-control-sm">
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="editTLIsActive">
+                        <label class="form-check-label small fw-bold text-dark" for="editTLIsActive">Active Status</label>
+                    </div>
+                </div>
+                <div class="modal-footer py-2 bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" id="btnSaveEditTL" class="btn btn-primary btn-sm px-3 fw-semibold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 3. Edit Employee Modal -->
+<div class="modal fade" id="editEmployeeModal" tabindex="-1" aria-labelledby="editEmployeeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="editEmployeeModalLabel"><i class="fa-solid fa-pen-to-square me-2"></i>Edit BA Personnel Details</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form onsubmit="submitEditEmployee(event)">
+                <div class="modal-body p-3">
+                    <input type="hidden" id="editEmpId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Employee Code <span class="text-danger">*</span></label>
+                        <input type="text" id="editEmpCode" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Full Name <span class="text-danger">*</span></label>
+                        <input type="text" id="editEmpName" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Designation</label>
+                        <input type="text" id="editEmpDesignation" class="form-control form-control-sm">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Circle <span class="text-danger">*</span></label>
+                        <select id="editEmpCircle" class="form-select form-select-sm" required onchange="filterSquadOptionsByCircle(this.value, 'editEmpTeamSelect')">
+                            <option value="BERHAMPUR">BERHAMPUR</option>
+                            <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                            <option value="ASKA">ASKA</option>
+                            <option value="BHANJANAGAR">BHANJANAGAR</option>
+                            <option value="JEYPORE">JEYPORE</option>
+                            <option value="RAYAGADA">RAYAGADA</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Assigned Squad Team</label>
+                        <select id="editEmpTeamSelect" class="form-select form-select-sm">
+                            <option value="">-- Unassigned / Individual --</option>
+                        </select>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="editEmpIsActive">
+                        <label class="form-check-label small fw-bold text-dark" for="editEmpIsActive">Personnel Active Status</label>
+                    </div>
+                </div>
+                <div class="modal-footer py-2 bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" id="btnSaveEditEmp" class="btn btn-primary btn-sm px-3 fw-semibold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 4. Edit Portal User Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold" id="editUserModalLabel"><i class="fa-solid fa-pen-to-square me-2"></i>Edit Portal Account</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form onsubmit="submitEditUser(event)">
+                <div class="modal-body p-3">
+                    <input type="hidden" id="editUserId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Username <span class="text-danger">*</span></label>
+                        <input type="text" id="editUsername" class="form-control form-control-sm" required autocomplete="off">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Role <span class="text-danger">*</span></label>
+                        <select id="editUserRole" class="form-select form-select-sm" required onchange="handleEditUserRoleChange(this.value)">
+                            <option value="USER">USER (Field Operator)</option>
+                            <option value="SUB_ADMIN">SUB_ADMIN (Circle Officer)</option>
+                            <option value="ADMIN">ADMIN (Full Master Control)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="editUserCircleGroup">
+                        <label class="form-label small fw-bold d-flex justify-content-between align-items-center">
+                            <span>Assigned Circle(s) <span class="text-danger">*</span></span>
+                            <small class="text-muted fw-normal">Select one or more</small>
+                        </label>
+                        <div class="border rounded p-2 bg-light" style="max-height: 155px; overflow-y: auto;">
+                            <div class="form-check form-check-sm mb-1">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="JEYPORE" id="edit_circle_jeypore">
+                                <label class="form-check-label small" for="edit_circle_jeypore">JEYPORE</label>
+                            </div>
+                            <div class="form-check form-check-sm mb-1">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="RAYAGADA" id="edit_circle_rayagada">
+                                <label class="form-check-label small" for="edit_circle_rayagada">RAYAGADA</label>
+                            </div>
+                            <div class="form-check form-check-sm mb-1">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="BHANJANAGAR" id="edit_circle_bhanjanagar">
+                                <label class="form-check-label small" for="edit_circle_bhanjanagar">BHANJANAGAR</label>
+                            </div>
+                            <div class="form-check form-check-sm mb-1">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="ASKA" id="edit_circle_aska">
+                                <label class="form-check-label small" for="edit_circle_aska">ASKA</label>
+                            </div>
+                            <div class="form-check form-check-sm mb-1">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="BERHAMPUR" id="edit_circle_berhampur">
+                                <label class="form-check-label small" for="edit_circle_berhampur">BERHAMPUR</label>
+                            </div>
+                            <div class="form-check form-check-sm">
+                                <input class="form-check-input edit-usr-circle-check" type="checkbox" value="BERHAMPUR CITY" id="edit_circle_city">
+                                <label class="form-check-label small" for="edit_circle_city">BERHAMPUR CITY</label>
+                            </div>
+                        </div>
+                        <input type="hidden" id="editUserCircle" name="circle">
+                    </div>
+                    <div class="form-check form-switch mb-3" id="editUserCanEditGroup">
+                        <input class="form-check-input" type="checkbox" id="editUserCanEdit">
+                        <label class="form-check-label small fw-bold text-dark" for="editUserCanEdit">Grant Edit / Modify Rights</label>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Reset Password</label>
+                        <input type="text" id="editUserNewPass" class="form-control form-control-sm" placeholder="Leave blank to keep existing password" autocomplete="off">
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="editUserIsActive">
+                        <label class="form-check-label small fw-bold text-dark" for="editUserIsActive">Account Login Active Status</label>
+                    </div>
+                </div>
+                <div class="modal-footer py-2 bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" id="btnSaveEditUser" class="btn btn-primary btn-sm px-3 fw-semibold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/admin.js"></script>
+{% endblock %}

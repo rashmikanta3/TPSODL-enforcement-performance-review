@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}User Profile & Security - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-user-gear text-primary me-2"></i>My Profile & Account Security
+        </h4>
+        <small class="text-muted">Manage your security credentials and view assigned operational scope</small>
+    </div>
+</div>
+
+<div class="row g-4 justify-content-center">
+    <!-- User Account Summary -->
+    <div class="col-md-5">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-address-card text-secondary me-2"></i>Account Information</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-4">
+                    <div class="bg-primary text-white rounded-circle p-3 me-3 d-flex align-items-center justify-content-center" style="width: 56px; height: 56px;">
+                        <i class="fa-solid fa-user fs-4"></i>
+                    </div>
+                    <div>
+                        <h5 class="fw-bold mb-0" id="profUsername">-</h5>
+                        <small class="text-muted" id="profRole">-</small>
+                    </div>
+                </div>
+
+                <ul class="list-group list-group-flush small">
+                    <li class="list-group-item d-flex justify-content-between px-0">
+                        <span class="text-muted">Assigned Circle</span>
+                        <strong id="profCircle">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between px-0">
+                        <span class="text-muted">Write Permission</span>
+                        <strong id="profCanEdit">-</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between px-0">
+                        <span class="text-muted">Portal Scope</span>
+                        <strong class="text-primary">TPSODL Squad Operations</strong>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Form -->
+    <div class="col-md-5">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-key text-warning me-2"></i>Change Password</h6>
+            </div>
+            <div class="card-body">
+                <form id="changePasswordForm" onsubmit="handleChangePassword(event)">
+                    <input type="hidden" id="cpUsername">
+
+                    <div class="mb-3">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" id="cpOldPassword" class="form-control" required placeholder="Enter current password">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="cpNewPassword" class="form-control" required minlength="3" placeholder="Enter new password">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="cpConfirmPassword" class="form-control" required minlength="3" placeholder="Re-enter new password">
+                    </div>
+
+                    <button type="submit" id="btnChangePassword" class="btn btn-primary w-100 py-2 fw-semibold">
+                        <i class="fa-solid fa-key me-1"></i> Update Password
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/profile.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const u = getCurrentUser();
+        if (u) {
+            document.getElementById('profUsername').innerText = u.username;
+            document.getElementById('profRole').innerText = u.role;
+            document.getElementById('profCircle').innerText = u.circle || 'All Circles (Admin)';
+            document.getElementById('profCanEdit').innerText = u.can_edit ? 'Create & Edit Allowed' : 'View Only';
+        }
+    });
+</script>
+{% endblock %}
+

@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+
+{% block title %}Executive Dashboard & Visual Analytics - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-3">
+    <div class="col-md-6">
+        <h4 class="fw-bold mb-0 text-dark">
+            <i class="fa-solid fa-chart-line text-primary me-2"></i>Executive Analytics & Squad Operations
+        </h4>
+        <small class="text-muted">Real-time database-aggregated enforcement and recovery metrics</small>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="col-md-6 mt-3 mt-md-0">
+        <div class="card p-2 shadow-sm border-0 bg-white">
+            <div class="row g-2 align-items-center">
+                <div class="col-4">
+                    <label class="form-label mb-0 small text-muted">From Date</label>
+                    <input type="date" id="dashFromDate" class="form-control form-control-sm">
+                </div>
+                <div class="col-4">
+                    <label class="form-label mb-0 small text-muted">To Date</label>
+                    <input type="date" id="dashToDate" class="form-control form-control-sm">
+                </div>
+                <div class="col-4">
+                    <label class="form-label mb-0 small text-muted">Circle</label>
+                    <select id="circleFilter" name="circleFilter" class="form-select form-select-sm">
+                        <option value="">ALL CIRCLES</option>
+                        <option value="ASKA">ASKA</option>
+                        <option value="BERHAMPUR">BERHAMPUR</option>
+                        <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                        <option value="BHANJANAGAR">BHANJANAGAR</option>
+                        <option value="JEYPORE">JEYPORE</option>
+                        <option value="RAYAGADA">RAYAGADA</option>
+                    </select>
+                </div>
+                <div class="col-12 d-flex justify-content-between align-items-center pt-1 flex-wrap gap-2">
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" onclick="exportDashLoadBookings('excel')" class="btn btn-outline-success btn-sm fw-semibold" title="Download All Load Bookings as Excel">
+                            <i class="fa-solid fa-file-excel me-1"></i> Bookings (Excel)
+                        </button>
+                        <button type="button" onclick="exportDashLoadBookings('pdf')" class="btn btn-outline-danger btn-sm fw-semibold" title="Download All Load Bookings as PDF">
+                            <i class="fa-solid fa-file-pdf me-1"></i> Bookings (PDF)
+                        </button>
+                    </div>
+                    <button id="btnRefreshDash" onclick="refreshDashboard()" class="btn btn-primary btn-sm px-3 fw-bold">
+                        <i class="fa-solid fa-arrows-rotate me-1"></i> Apply Filter
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 1. Executive KPI Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card bg-primary text-white p-3 h-100 shadow-sm">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">Load Booked</div>
+                    <div class="kpi-value my-1" id="kpiLoadBooked">0 kW</div>
+                </div>
+                <i class="fa-solid fa-bolt-lightning kpi-icon text-warning"></i>
+            </div>
+            <small class="text-white-50 mt-auto">Detected Theft Load</small>
+        </div>
+    </div>
+
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card bg-success text-white p-3 h-100 shadow-sm">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">Amount Collected</div>
+                    <div class="kpi-value my-1" id="kpiCollection">₹ 0</div>
+                </div>
+                <i class="fa-solid fa-indian-rupee-sign kpi-icon text-light"></i>
+            </div>
+            <small class="text-white-50 mt-auto">MR Payment Realized</small>
+        </div>
+    </div>
+
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card bg-dark text-white p-3 h-100 shadow-sm">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">MR Receipts</div>
+                    <div class="kpi-value my-1" id="kpiMRCount">0</div>
+                </div>
+                <i class="fa-solid fa-receipt kpi-icon text-info"></i>
+            </div>
+            <small class="text-white-50 mt-auto">Total Receipts Issued</small>
+        </div>
+    </div>
+
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card text-white p-3 h-100 shadow-sm" style="background-color: #ea580c;">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">Theft Cases</div>
+                    <div class="kpi-value my-1" id="kpiTheftCount">0</div>
+                </div>
+                <i class="fa-solid fa-shield-virus kpi-icon text-white"></i>
+            </div>
+            <small class="text-white-50 mt-auto">Booked Irregularities</small>
+        </div>
+    </div>
+
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card bg-danger text-white p-3 h-100 shadow-sm">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">DC Done</div>
+                    <div class="kpi-value my-1" id="kpiDCCount">0</div>
+                </div>
+                <i class="fa-solid fa-scissors kpi-icon text-white"></i>
+            </div>
+            <small class="text-white-50 mt-auto">Disconnections Executed</small>
+        </div>
+    </div>
+
+    <div class="col-6 col-lg-2">
+        <div class="card kpi-card text-white p-3 h-100 shadow-sm" style="background-color: #7c3aed;">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="kpi-label text-white-50">DC Involving Amount</div>
+                    <div class="kpi-value my-1" id="kpiDCAmount">₹ 0</div>
+                </div>
+                <i class="fa-solid fa-hand-holding-dollar kpi-icon text-white"></i>
+            </div>
+            <small class="text-white-50 mt-auto">Pending In Disconnection</small>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Vertical Charts Row 1 -->
+<div class="row g-3 mb-4">
+    <!-- Circle-wise Load Booking Chart -->
+    <div class="col-lg-6">
+        <div class="card h-100 shadow-sm" id="cardCircleLoad">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                <span class="fw-bold"><i class="fa-solid fa-chart-column text-danger me-2"></i>Circle-wise Load Booking (Theft Types)</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardCircleLoad', 'Circle_Load_Booking')" title="Download Chart PNG">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardCircleLoad', 'Circle-wise Load Booking')" title="Share via WhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="height: 330px;">
+                <canvas id="chartCircleLoad"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team-wise Load Booking Chart -->
+    <div class="col-lg-6">
+        <div class="card h-100 shadow-sm" id="cardTeamLoad">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                <span class="fw-bold"><i class="fa-solid fa-users text-primary me-2"></i>Squad-wise Load Booking Breakdown</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardTeamLoad', 'Squad_Load_Booking')" title="Download Chart PNG">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardTeamLoad', 'Squad-wise Load Booking')" title="Share via WhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="height: 330px;">
+                <canvas id="chartTeamLoad"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. Vertical Charts Row 2 -->
+<div class="row g-3 mb-4">
+    <!-- Circle-wise Collection Chart -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm" id="cardCircleColl">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                <span class="fw-bold"><i class="fa-solid fa-indian-rupee-sign text-success me-2"></i>Circle-wise Collections</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardCircleColl', 'Circle_Collection')" title="Download PNG">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardCircleColl', 'Circle-wise Collection')" title="Share via WhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="height: 290px;">
+                <canvas id="chartCircleColl"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team-wise Collection Chart -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm" id="cardTeamColl">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                <span class="fw-bold"><i class="fa-solid fa-sack-dollar text-teal me-2"></i>Squad-wise Collections</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardTeamColl', 'Squad_Collection')" title="Download PNG">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardTeamColl', 'Squad-wise Collection')" title="Share via WhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="height: 290px;">
+                <canvas id="chartTeamColl"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- DC Count & Pending Amount Dual-Axis Chart -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm" id="cardDC">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                <span class="fw-bold"><i class="fa-solid fa-scissors text-purple me-2"></i>Disconnections (DC & ₹)</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardDC', 'Disconnections')" title="Download PNG">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardDC', 'Disconnections Summary')" title="Share via WhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="height: 290px;">
+                <canvas id="chartDC"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 4. Daily Team Operations Status Table & Breakdown -->
+<div class="card shadow-sm mb-4" id="cardDailyOpsStatus">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-clipboard-user text-primary me-2"></i>Daily Squad Operations Status</h6>
+            <small class="text-muted">Operational posture, daily designated leaders, and merged squad matrix</small>
+        </div>
+
+        <!-- Mini Horizontal Status Counters -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge badge-independent-tl px-2 py-1">
+                Active with TL: <strong id="cntActiveTL">0</strong>
+            </span>
+            <span class="badge badge-independent-coll px-2 py-1">
+                Collection Only: <strong id="cntActiveColl">0</strong>
+            </span>
+            <span class="badge badge-merged px-2 py-1">
+                Merged: <strong id="cntMerged">0</strong>
+            </span>
+            <span class="badge bg-secondary text-white px-2 py-1">
+                Office (No Veh): <strong id="cntOfficeDuty">0</strong>
+            </span>
+            <span class="badge badge-non-op px-2 py-1">
+                Non-Op: <strong id="cntNonOp">0</strong>
+            </span>
+            
+            <div class="btn-group btn-group-sm ms-2">
+                <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardDailyOpsStatus', 'Daily_Squad_Operations_Status')" title="Export Table as Image">
+                    <i class="fa-solid fa-camera me-1"></i> Image
+                </button>
+                <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardDailyOpsStatus', 'Daily Squad Operations Status')" title="Share via WhatsApp">
+                    <i class="fa-brands fa-whatsapp me-1"></i> WhatsApp
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-custom table-hover table-striped mb-0">
+            <thead>
+                <tr>
+                    <th class="text-center" style="width: 60px;">Sl No</th>
+                    <th>Squad / Circle</th>
+                    <th>Operated By (TL)</th>
+                    <th>Mode of Operation</th>
+                    <th>Active Target / Merged Team</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody id="dailyOpsStatusBody">
+                <tr><td colspan="6" class="text-center text-muted py-3">Loading squad operations...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 5. Squad Performance Summary Table -->
+<div class="card shadow-sm mb-4" id="cardSquadPerf">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <div>
+            <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-trophy text-warning me-2"></i>Squad Performance Summary</h6>
+            <small class="text-muted">Attributed output per operational squad (Load, Collections, DCs, and KM run)</small>
+        </div>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="downloadCardAsImage('cardSquadPerf', 'Squad_Performance_Summary')">
+                <i class="fa-solid fa-camera me-1"></i> Image
+            </button>
+            <button class="btn btn-whatsapp" onclick="shareCardWhatsApp('cardSquadPerf', 'Squad Performance Summary')">
+                <i class="fa-brands fa-whatsapp me-1"></i> WhatsApp
+            </button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-custom table-hover table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Team Name</th>
+                    <th>Permanent TL</th>
+                    <th>Operating Mode / Merged Status</th>
+                    <th class="text-end">Load Booked (kW)</th>
+                    <th class="text-end">Amount Collected (₹)</th>
+                    <th class="text-center">No. of DC Done</th>
+                    <th class="text-end">DC Amount (₹)</th>
+                    <th class="text-center">KM Run</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody id="squadPerformanceBody">
+                <tr><td colspan="9" class="text-center text-muted py-3">Loading performance table...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}
+

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Team Operations & Member Attendance Register - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-users-viewfinder text-primary me-2"></i>Daily Team Operations & Member Attendance Register
+        </h4>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-secondary me-2"></i>Teams Parameters & Field Supervision</h6>
+    </div>
+    <div class="card-body">
+        <div id="att-status-banner" style="display:none; padding:10px 14px; border-radius:6px; font-size:13px; font-weight:600; margin-bottom:12px;"></div>
+
+        <form id="attendance-form" onsubmit="handleAttendanceSubmit(event)">
+            <!-- Grid 1: Date, Circle, Team, TL Name -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Date</label>
+                    <input type="date" id="att-date" class="form-control" onchange="onDateOrTeamChange()" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Circle</label>
+                    <select id="att-circle-filter" class="form-select" onchange="onAttendanceCircleChange()" required>
+                        <option value="BERHAMPUR">BERHAMPUR</option>
+                        <option value="CITY">CITY</option>
+                        <option value="ASKA">ASKA</option>
+                        <option value="BHANJANAGAR">BHANJANAGAR</option>
+                        <option value="JEYPORE">JEYPORE</option>
+                        <option value="RAYAGADA">RAYAGADA</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Team / Squad</label>
+                    <select id="att-team" class="form-select" onchange="onDateOrTeamChange()" required>
+                        <option value="">-- Choose Circle First --</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Name of TL (TPSODL Official)</label>
+                    <select id="att-tl-name" class="form-select" required>
+                        <option value="">-- Select Team Leader --</option>
+                    </select>
+                    <small class="text-muted d-block" style="font-size: 0.72rem;">TPSODL Supervisor (No BA attendance)</small>
+                </div>
+            </div>
+
+            <!-- Grid 2: Active Status & Field Supervision -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold small">Team Active Status</label>
+                    <select id="att-active" class="form-select" onchange="toggleTeamActiveStatus()">
+                        <option value="true">Active</option>
+                        <option value="false">Inactive / Non-Operational</option>
+                    </select>
+                </div>
+                <div class="col-md-6" id="tl-status-wrapper">
+                    <label class="form-label fw-bold small">Deployment / Field Supervision</label>
+                    <select id="att-tl-present" class="form-select" onchange="toggleTLStatus()">
+                        <option value="true">Operating with Team Leader</option>
+                        <option value="false">Operating without Field TL</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Arrangement Box (when TL is absent or merged) -->
+            <div id="tl-absent-box" class="card p-3 mb-3 border bg-light" style="display: none;">
+                <label class="fw-bold small text-dark mb-1">Squad Operational Arrangement:</label>
+                <div class="d-flex gap-4 align-items-center flex-wrap mt-1">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="tl_mode" id="modeIndependent" value="Independent" checked onchange="toggleMerge(false)">
+                        <label class="form-check-label small fw-semibold" for="modeIndependent">Independent Squad Duty (Collection Only)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="tl_mode" id="modeMerged" value="Merged" onchange="toggleMerge(true)">
+                        <label class="form-check-label small fw-semibold text-primary" for="modeMerged">Joint Operation / Merged Squad</label>
+                    </div>
+                    <div id="merge-team-wrapper" style="display: none; min-width: 250px;">
+                        <select id="merge-team" class="form-select form-select-sm">
+                            <option value="">-- Select Partner Squad in Circle --</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Remarks Box (shown if Inactive or Merged) -->
+            <div id="remarks-box" class="mb-3" style="display: none;">
+                <label class="form-label fw-bold small text-danger">Remarks / Operational Reason</label>
+                <input type="text" id="att-remarks" class="form-control" placeholder="Specify reason (vehicle breakdown, joint raid, emergency)...">
+            </div>
+
+            <!-- BA Member Attendance Table -->
+            <div class="mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-dark">
+                        <i class="fa-solid fa-clipboard-check text-success me-2"></i>BA Contractor Squad Members Muster Roll
+                    </h6>
+                    <span class="badge bg-secondary">Only BA Personnel Marked Here</span>
+                </div>
+                <div class="table-responsive border rounded-3">
+                    <table class="table table-custom table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 140px;">Emp Code</th>
+                                <th>Employee Name</th>
+                                <th>Designation</th>
+                                <th style="width: 200px; text-align: center;">Status (P / A / L / -)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="roster-tbody">
+                            <tr><td colspan="4" class="text-center text-muted py-4">Select circle and squad to load members</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mt-4 text-end">
+                <button type="submit" id="att-submit-btn" class="btn btn-primary px-4 py-2 fw-semibold">
+                    <i class="fa-solid fa-lock me-1"></i> Save & Lock Attendance
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/attendance.js"></script>
+{% endblock %}

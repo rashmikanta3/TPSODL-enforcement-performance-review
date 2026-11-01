@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Load Booking Entry Desk - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-bolt text-warning me-2"></i>⚡ Real-Time Load Booking Entry
+        </h4>
+        <small class="text-muted">Enter Employee / Team Leader ID to resolve Circle and electrical hierarchy. Select Division, Subdivision, and Section.</small>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <!-- Load Booking Form Card -->
+    <div class="col-lg-8 col-xl-7">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 border-bottom d-flex align-items-center justify-content-between">
+                <h6 class="fw-bold mb-0 text-dark">
+                    <i class="fa-solid fa-file-circle-plus text-primary me-2"></i>Load Booking Entry Form
+                </h6>
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 small">
+                    <i class="fa-solid fa-shield-halved me-1"></i>TPSODL Enforcement
+                </span>
+            </div>
+            <div class="card-body p-4">
+                <!-- Duplicate / General Error Alert -->
+                <div id="lbPageErrorAlert" class="alert alert-danger py-2 px-3 small rounded-3 mb-3 fw-bold" style="display:none;">
+                    <i class="fa-solid fa-triangle-exclamation me-2"></i><span id="lbPageErrorText">Duplicate Page Number! This page has already been used.</span>
+                </div>
+
+                <form id="loadBookingForm" onsubmit="submitLoadBooking(event)">
+                    <!-- Hidden field for booking date -->
+                    <input type="hidden" id="lbBookingDate" value="">
+
+                    <!-- Field 1: TPSODL Team Leader Code / Officer ID -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-dark">
+                            TPSODL Team Leader Code / Officer ID <span class="text-danger">*</span>
+                        </label>
+                        <div class="input-group">
+                            <input type="text" id="lbEmpCode" class="form-control" placeholder="e.g. TL-101 or 522703" required autocomplete="off">
+                            <button type="button" id="btnVerifyEmp" onclick="verifyEmployeeCode()" class="btn btn-primary px-3">
+                                <i class="fa-solid fa-circle-check me-1"></i> Verify Code
+                            </button>
+                        </div>
+                        <div id="verifyStatusNotice" class="small mt-1" style="display:none;"></div>
+                    </div>
+
+                    <!-- Fields 2 & 3: Officer Name and Assigned Circle -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-6">
+                            <div class="p-2 border rounded-3 bg-light">
+                                <label class="form-label text-muted small mb-0 fw-semibold d-block">TPSODL Officer / TL Name</label>
+                                <span id="lbEmpName" class="fw-bold text-dark small">Auto-populated upon lookup</span>
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <div class="p-2 border rounded-3 bg-light">
+                                <label class="form-label text-muted small mb-0 fw-semibold d-block">Assigned Circle</label>
+                                <span id="lbAssignedCircle" class="fw-bold text-dark small">Auto-populated upon lookup</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Electrical Hierarchy: Division, Subdivision, Section -->
+                    <div class="p-3 border rounded-3 mb-3 bg-white">
+                        <div class="small fw-bold text-primary mb-2">
+                            <i class="fa-solid fa-sitemap me-1"></i> Dependent TPSODL Electrical Hierarchy
+                        </div>
+
+                        <!-- Field 4: Division -->
+                        <div class="mb-2">
+                            <label class="form-label small mb-1 fw-bold">Division <span class="text-danger">*</span></label>
+                            <select id="lbDivision" class="form-select form-select-sm" onchange="onDivisionChange(this.value)" required>
+                                <option value="">-- Verify Employee Code First --</option>
+                            </select>
+                        </div>
+
+                        <!-- Field 5: Subdivision -->
+                        <div class="mb-2">
+                            <label class="form-label small mb-1 fw-bold">Subdivision <span class="text-danger">*</span></label>
+                            <select id="lbSubdivision" class="form-select form-select-sm" onchange="onSubdivisionChange(this.value)" required>
+                                <option value="">-- Choose Division First --</option>
+                            </select>
+                        </div>
+
+                        <!-- Field 6: Section (ESO) -->
+                        <div class="mb-1">
+                            <label class="form-label small mb-1 fw-bold">Section (ESO) <span class="text-danger">*</span></label>
+                            <select id="lbSection" class="form-select form-select-sm" required>
+                                <option value="">-- Choose Subdivision First --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Fields 7 & 8: Book Number and Page Number -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-bold">Book Number <span class="text-danger">*</span></label>
+                            <input type="text" id="lbBookNumber" class="form-control form-control-sm" placeholder="e.g. B-102" required autocomplete="off">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-bold">Page Number <span class="text-danger">*</span></label>
+                            <input type="text" id="lbPageNumber" class="form-control form-control-sm" placeholder="e.g. 15" required autocomplete="off">
+                            <div class="invalid-feedback" style="font-size: 0.72rem;">Duplicate Page Number! This page has already been used.</div>
+                        </div>
+                    </div>
+
+                    <!-- Fields 9 & 10: Booked Load and Theft Type -->
+                    <div class="row g-2 mb-4">
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-bold">Load in kW (Max 100 kW, 3 Decimals) <span class="text-danger">*</span></label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="0.001" min="0.001" max="100" id="lbBookedLoad" class="form-control fw-bold" placeholder="e.g. 12.345" required>
+                                <span class="input-group-text bg-light fw-bold">kW</span>
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-bold">Theft Type <span class="text-danger">*</span></label>
+                            <select id="lbTheftType" class="form-select form-select-sm" required>
+                                <option value="Hooking">Hooking</option>
+                                <option value="Meter Tamper">Meter Tamper</option>
+                                <option value="Bypass">Bypass</option>
+                                <option value="Misuse">Misuse</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Action Button -->
+                    <button type="submit" id="btnSaveLBk" class="btn btn-primary w-100 py-2 fw-semibold">
+                        <i class="fa-solid fa-floppy-disk me-1"></i> 💾 Submit Load Booking
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/load_booking.js"></script>
+{% endblock %}

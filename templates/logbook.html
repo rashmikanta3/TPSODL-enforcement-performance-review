@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicle Daily Log Book Entry - TPSODL{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-truck-moving text-primary me-2"></i>Vehicle Daily Log Book Entry
+        </h4>
+        <small class="text-muted">Record squad patrol vehicle kilometers, starting/ending odometer readings, and movement routes</small>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <!-- Log Entry Form Card -->
+    <div class="col-lg-8 col-xl-7">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-3 border-bottom">
+                <h6 class="fw-bold mb-0 text-dark">
+                    <i class="fa-solid fa-pen-to-square text-primary me-2"></i>Daily Vehicle Log Parameters
+                </h6>
+            </div>
+            <div class="card-body p-4">
+                <div id="log-status-banner" style="display:none; padding:10px 14px; border-radius:6px; font-size:13px; font-weight:600; margin-bottom:12px;"></div>
+
+                <form id="logbook-form" onsubmit="submitLogBook(event)">
+                    <!-- Grid 1: Date, Circle, Team -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Date</label>
+                            <input type="date" id="log-date" class="form-control form-control-sm" onchange="checkExistingLog()" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Circle</label>
+                            <select id="log-circle" class="form-select form-select-sm" onchange="onLogCircleChange()" required>
+                                <option value="BERHAMPUR">BERHAMPUR</option>
+                                <option value="BERHAMPUR CITY">BERHAMPUR CITY</option>
+                                <option value="ASKA">ASKA</option>
+                                <option value="BHANJANAGAR">BHANJANAGAR</option>
+                                <option value="JEYPORE">JEYPORE</option>
+                                <option value="RAYAGADA">RAYAGADA</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Team (Squad)</label>
+                            <select id="log-team" class="form-select form-select-sm" onchange="onLogTeamSelect()" required>
+                                <option value="">-- Choose Circle First --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Grid 2: Name of TL, Vehicle Number -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Name of TL</label>
+                            <input type="text" id="log-tl-name" class="form-control form-control-sm bg-light" placeholder="Team Leader Name" readonly required>
+                            <small class="text-muted" style="font-size: 0.72rem;">TPSODL permanent TL from squad profile</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Vehicle Number</label>
+                            <input type="text" id="log-vehicle" class="form-control form-control-sm" placeholder="e.g. OD-07-AA-1234" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Supervisor / Driver</label>
+                        <input type="text" id="log-supervisor" class="form-control form-control-sm" placeholder="Supervisor or Driver Name">
+                    </div>
+
+                    <!-- Start Time & End Time -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Start Time *</label>
+                            <input type="time" id="lbStartTime" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">End Time *</label>
+                            <input type="time" id="lbEndTime" class="form-control form-control-sm" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Movement Area / Route Details</label>
+                        <textarea id="log-route" class="form-control form-control-sm" rows="2" placeholder="Patrol route and areas covered..." required></textarea>
+                    </div>
+
+                    <!-- Grid 3: Start KM, End KM, Total KM Run -->
+                    <div class="row g-2 mb-4">
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">Starting KM</label>
+                            <input type="number" id="log-start" class="form-control form-control-sm" oninput="calcKm()" min="0" required placeholder="0">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">Ending KM</label>
+                            <input type="number" id="log-end" class="form-control form-control-sm" oninput="calcKm()" min="0" required placeholder="0">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">Total KM Run</label>
+                            <input type="text" id="log-total" class="form-control form-control-sm bg-light fw-bold text-primary" readonly placeholder="0 KM">
+                        </div>
+                    </div>
+
+                    <button type="submit" id="btnSaveLog" class="btn btn-primary w-100 py-2 fw-semibold">
+                        <i class="fa-solid fa-save me-1"></i> Save Log Entry
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/logbook.js"></script>
+{% endblock %}
