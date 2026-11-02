@@ -1,0 +1,40 @@
+services:
+  # 1. FastAPI Application
+  fastapi-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tpsodl_fastapi
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    networks:
+      - tpsodl_net
+
+  # 2. Caddy Reverse Proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: tpsodl_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - tpsodl_net
+    depends_on:
+      - fastapi-web
+
+networks:
+  tpsodl_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
