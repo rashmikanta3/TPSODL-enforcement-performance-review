@@ -1,3 +1,7 @@
+import io
+from fastapi.responses import Response
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 from datetime import date
 from typing import Optional, List, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -242,6 +246,12 @@ def punch_load_booking(
 
     if current_user:
         verify_write_permission(current_user, circle_clean)
+        if current_user.role == "USER":
+            if req.team_id and current_user.team_id and req.team_id != current_user.team_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access Denied: You cannot submit bookings for another squad (Team ID: {req.team_id})."
+                )
 
     # Enforce duplicate check: (circle, book_number, page_no)
     existing_page = db.query(LoadBooking).filter(
@@ -296,6 +306,10 @@ def punch_load_booking(
         if tm:
             assigned_team_id = tm.id
 
+    # Squad user isolation: enforce current_user.team_id
+    if current_user and current_user.role == "USER" and current_user.team_id:
+        assigned_team_id = current_user.team_id
+
     if assigned_team_id:
         tm = db.query(Team).filter(Team.id == assigned_team_id).first()
         if tm and (tm.is_office_team or not tm.has_vehicle):
@@ -304,10 +318,24 @@ def punch_load_booking(
                 detail=f"Operation not permitted: Squad '{tm.name}' is designated as an Office Team (Without Vehicle). Office Teams do not execute field enforcement operations."
             )
 
+    vcr_num = (req.vcr_number or "").strip() or None
+    if vcr_num and not req.allow_duplicate:
+        existing_lb = db.query(LoadBooking).filter(
+            func.lower(LoadBooking.vcr_number) == vcr_num.lower()
+        ).order_by(LoadBooking.id.desc()).first()
+        if existing_lb:
+            tm = db.query(Team).filter(Team.id == existing_lb.team_id).first()
+            tm_name = tm.name if tm else "N/A"
+            raise HTTPException(
+                status_code=409,
+                detail=f"VCR Number '{vcr_num}' has already been recorded on {existing_lb.booking_date} by squad '{tm_name}'. Confirm to proceed."
+            )
+
     booking = LoadBooking(
         booking_date=booking_date,
         book_number=book_number,
         page_no=page_no,
+        vcr_number=vcr_num,
         tl_code=tl.tl_code if tl else tl_code,
         punch_emp_id=None,
         team_id=assigned_team_id,
@@ -318,7 +346,8 @@ def punch_load_booking(
         pincode=None,
         theft_type=req.theft_type.strip(),
         booked_load=booked_load,
-        status="PENDING"
+        status="PENDING",
+        is_locked=True
     )
     db.add(booking)
     db.commit()
@@ -335,8 +364,230 @@ def punch_load_booking(
         "booking_id": booking.id,
         "book_number": booking.book_number,
         "page_no": booking.page_no,
+        "vcr_number": booking.vcr_number or "",
         "tl_code": booking.tl_code,
         "attributed_team_id": assigned_team_id,
         "attributed_team_name": team_name,
         "message": f"Load Booking of {booked_load} kW ({req.theft_type}) on Book '{book_number}', Page '{page_no}' saved and dynamically attributed to {team_name}!"
     }
+
+@router.get("/recent")
+def get_recent_load_bookings(
+    circle: Optional[str] = None,
+    limit: int = 5,
+    page_no: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    """Returns recent load bookings with locked status and squad scoping."""
+    q = db.query(LoadBooking)
+    if current_user and current_user.role == "USER":
+        if current_user.team_id:
+            q = q.filter(LoadBooking.team_id == current_user.team_id)
+        else:
+            q = q.filter(LoadBooking.team_id == -1)
+    elif current_user and current_user.role == "SUB_ADMIN":
+        allowed = get_assigned_circles(current_user)
+        expanded = list(allowed)
+        if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:
+            expanded.append("CITY")
+        if "CITY" in allowed and "BERHAMPUR CITY" not in expanded:
+            expanded.append("BERHAMPUR CITY")
+        if circle and circle.strip().upper() not in ("", "ALL"):
+            c_up = circle.strip().upper()
+            if not is_circle_authorized(current_user, c_up):
+                raise HTTPException(status_code=403, detail=f"Unauthorized for circle: {circle}")
+            if c_up in ("CITY", "BERHAMPUR CITY"):
+                q = q.filter(LoadBooking.circle.in_(["CITY", "BERHAMPUR CITY"]))
+            else:
+                q = q.filter(LoadBooking.circle == c_up)
+        else:
+            q = q.filter(LoadBooking.circle.in_(expanded))
+    elif circle and circle.strip().upper() not in ("", "ALL"):
+        c_up = circle.strip().upper()
+        if c_up in ("CITY", "BERHAMPUR CITY"):
+            q = q.filter(LoadBooking.circle.in_(["CITY", "BERHAMPUR CITY"]))
+        else:
+            q = q.filter(LoadBooking.circle == c_up)
+
+    if page_no and page_no.strip():
+        q = q.filter(LoadBooking.page_no.ilike(f"%{page_no.strip()}%"))
+
+    bookings = q.order_by(LoadBooking.id.desc()).limit(limit).all()
+    return [
+        {
+            "id": b.id,
+            "booking_date": str(b.booking_date),
+            "book_number": b.book_number,
+            "page_no": b.page_no,
+            "vcr_number": b.vcr_number or "",
+            "tl_code": b.tl_code,
+            "team_id": b.team_id,
+            "team_name": b.team.name if b.team else "Unassigned",
+            "circle": b.circle,
+            "division": b.division,
+            "subdivision": b.subdivision,
+            "section": b.section,
+            "theft_type": b.theft_type,
+            "booked_load": b.booked_load,
+            "status": b.status,
+            "is_locked": bool(getattr(b, "is_locked", True))
+        }
+        for b in bookings
+    ]
+
+@router.delete("/{booking_id}")
+def delete_load_booking(
+    booking_id: int,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    booking = db.query(LoadBooking).filter(LoadBooking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Load booking record not found")
+    if not current_user or current_user.role == "USER":
+        raise HTTPException(
+            status_code=403,
+            detail="This record is locked after submission. Contact your Circle Admin or MIS In-Charge to make corrections."
+        )
+    if current_user.role == "SUB_ADMIN":
+        if not is_circle_authorized(current_user, booking.circle):
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have permissions for this circle.")
+        if not current_user.can_edit:
+            raise HTTPException(status_code=403, detail="View-only Sub-Admin account cannot delete records.")
+
+    db.delete(booking)
+    db.commit()
+    return {"success": True, "id": booking_id, "message": "Load booking deleted successfully"}
+
+@router.patch("/{booking_id}/toggle-lock")
+def toggle_booking_lock(
+    booking_id: int,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    if not current_user or current_user.role not in ["ADMIN", "SUB_ADMIN"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Only Admins and Sub-Admins can lock or unlock load booking records."
+        )
+    booking = db.query(LoadBooking).filter(LoadBooking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Load booking record not found")
+    if current_user.role == "SUB_ADMIN" and not is_circle_authorized(current_user, booking.circle):
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have permissions for this circle.")
+
+    booking.is_locked = not bool(getattr(booking, "is_locked", True))
+    db.commit()
+    db.refresh(booking)
+    state_str = "locked" if booking.is_locked else "unlocked"
+    return {
+        "success": True,
+        "id": booking.id,
+        "is_locked": bool(booking.is_locked),
+        "message": f"Load Booking record {state_str} successfully"
+    }
+
+
+
+@router.get("/export-excel")
+def export_load_bookings_excel(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    circle: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    """Exports Load Bookings within date range to an Excel (.xlsx) file."""
+    q = db.query(LoadBooking)
+    if current_user and current_user.role == "USER":
+        if current_user.team_id:
+            q = q.filter(LoadBooking.team_id == current_user.team_id)
+        else:
+            q = q.filter(LoadBooking.team_id == -1)
+    elif current_user and current_user.role == "SUB_ADMIN":
+        allowed = get_assigned_circles(current_user)
+        expanded = list(allowed)
+        if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:
+            expanded.append("CITY")
+        if "CITY" in allowed and "BERHAMPUR CITY" not in expanded:
+            expanded.append("BERHAMPUR CITY")
+        if circle and circle.strip().upper() not in ("", "ALL"):
+            c_up = circle.strip().upper()
+            if not is_circle_authorized(current_user, c_up):
+                raise HTTPException(status_code=403, detail=f"Unauthorized for circle: {circle}")
+            if c_up in ("CITY", "BERHAMPUR CITY"):
+                q = q.filter(LoadBooking.circle.in_(["CITY", "BERHAMPUR CITY"]))
+            else:
+                q = q.filter(LoadBooking.circle == c_up)
+        else:
+            q = q.filter(LoadBooking.circle.in_(expanded))
+    elif circle and circle.strip().upper() not in ("", "ALL"):
+        c_up = circle.strip().upper()
+        if c_up in ("CITY", "BERHAMPUR CITY"):
+            q = q.filter(LoadBooking.circle.in_(["CITY", "BERHAMPUR CITY"]))
+        else:
+            q = q.filter(LoadBooking.circle == c_up)
+
+    if start_date:
+        q = q.filter(LoadBooking.booking_date >= start_date)
+    if end_date:
+        q = q.filter(LoadBooking.booking_date <= end_date)
+
+    records = q.order_by(LoadBooking.booking_date.desc(), LoadBooking.id.desc()).all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Load_Bookings"
+
+    headers = [
+        "ID", "Booking Date", "VCR Number", "Book No", "Page No", "Squad Name",
+        "Circle", "Division", "Subdivision", "Section", "Theft Type",
+        "Booked Load (kW)", "TL / Officer Code", "Status", "Locked"
+    ]
+    ws.append(headers)
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center")
+
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+
+    for r in records:
+        ws.append([
+            r.id,
+            str(r.booking_date) if r.booking_date else "",
+            r.vcr_number or "",
+            r.book_number or "",
+            r.page_no or "",
+            r.team.name if r.team else "Unassigned",
+            r.circle or "",
+            r.division or "",
+            r.subdivision or "",
+            r.section or "",
+            r.theft_type or "",
+            float(r.booked_load or 0),
+            r.tl_code or "",
+            r.status or "PENDING",
+            "YES" if getattr(r, "is_locked", True) else "NO"
+        ])
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    filename = f"Load_Bookings_{date.today().isoformat()}.xlsx"
+    return Response(
+        content=stream.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )

@@ -99,6 +99,8 @@ def get_current_actor(
 
     role = request.headers.get("x-user-role")
     circle = request.headers.get("x-user-circle")
+    team_id_hdr = request.headers.get("x-user-team-id")
+    team_id_val = int(team_id_hdr) if team_id_hdr and team_id_hdr.strip().isdigit() else None
     if role:
         can_edit_header = request.headers.get("x-user-can-edit", "true").lower() in ("true", "1", "yes")
         u = User(
@@ -106,6 +108,7 @@ def get_current_actor(
             username=username or "api_user",
             role=role.strip().upper(),
             circle=circle or "",
+            team_id=team_id_val,
             can_edit=can_edit_header,
             is_active=True
         )
@@ -153,5 +156,33 @@ def verify_write_permission(user: Optional[User], circle: Optional[str] = None):
             )
         return True
 
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+def verify_team_permission(user: Optional[User], team_id: Optional[int]):
+    """
+    Enforces Team-level squad isolation:
+    - ADMIN: Full access to any squad.
+    - SUB_ADMIN: Can access any squad in their authorized circle(s).
+    - USER: Restricted strictly to their assigned team_id.
+    """
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required."
+        )
+    if user.role in ["ADMIN", "SUB_ADMIN"]:
+        return True
+    if user.role == "USER":
+        if not user.team_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: Your account is not assigned to any specific squad. Contact your administrator."
+            )
+        if team_id is not None and user.team_id != team_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access Denied: You are only authorized to access and submit data for your assigned squad (Team ID: {user.team_id})."
+            )
+        return True
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 

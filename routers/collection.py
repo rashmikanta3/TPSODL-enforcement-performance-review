@@ -71,13 +71,18 @@ def get_collection_stats(
     }
 
 @router.post("/upload")
+@router.post("/bulk-upload")
 async def upload_collection_excel(
     file: UploadFile = File(...),
     current_user: Optional[User] = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
-    if current_user:
-        verify_write_permission(current_user)
+    if not current_user or current_user.role not in ["ADMIN", "SUB_ADMIN"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Access Denied: Only Circle Sub-Admins and System Admins are authorized to upload VCR or Collection data."
+        )
+    verify_write_permission(current_user)
 
     if not file.filename.lower().endswith(('.xlsx', '.xlsm')):
         raise HTTPException(status_code=400, detail="Only Excel (.xlsx) files are supported")

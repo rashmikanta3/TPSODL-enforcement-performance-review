@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 
-{% block title %}Disconnection (DC) Entry Desk - TPSODL{% endblock %}
+{% block title %}Disconnection (DC) Entry Desk - TPSODL
+<!-- Duplicate VCR Warning Confirmation Modal -->
+<div class="modal fade" id="duplicateVcrModal" tabindex="-1" aria-labelledby="duplicateVcrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-warning bg-opacity-25 border-bottom border-warning">
+                <h5 class="modal-title fw-bold text-dark" id="duplicateVcrModalLabel">
+                    <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>Duplicate VCR Detected
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <p class="mb-2 text-dark" id="duplicateVcrModalMsg">
+                    This VCR Number has already been recorded.
+                </p>
+                <div class="alert alert-light border small text-muted mb-0" id="duplicateVcrDetails">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-top">
+                <button type="button" class="btn btn-secondary btn-sm px-3" data-bs-dismiss="modal" id="btnCancelDuplicate">
+                    <i class="fa-solid fa-xmark me-1"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-warning btn-sm px-3 fw-bold text-dark" id="btnConfirmDuplicate">
+                    <i class="fa-solid fa-check me-1"></i> Yes, Proceed and Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
 
 {% block content %}
 <div class="row mb-3">
@@ -78,7 +109,23 @@
 
                     <div class="mb-3">
                         <label class="form-label small fw-bold">DC Authority TPSODL Team Leader / Officer Code <span class="text-danger">*</span></label>
-                        <input type="text" id="dcAuthorityEmpId" class="form-control form-control-sm" placeholder="e.g. TL-101 or 522703" required>
+                        <!-- Companion Circle-Filtered Dropdown -->
+                        <div class="mb-2">
+                            <label class="form-label mb-1 text-muted" style="font-size: 0.8rem;">Select from Circle Team Leaders</label>
+                            <select id="dcTlSelect" class="form-select form-select-sm" onchange="onDcTlSelectChange()">
+                                <option value="">-- Verify VCR First to Filter by Circle --</option>
+                            </select>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-md-5">
+                                <label class="form-label mb-1 text-muted" style="font-size: 0.8rem;">TL Employee Code</label>
+                                <input type="text" id="dcAuthorityEmpId" name="dc_authority_tl_code" class="form-control form-control-sm fw-bold" placeholder="e.g. TL-101 or 120664" required onblur="lookupDcTL()" oninput="debounceDcTLLookup()">
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label mb-1 text-muted" style="font-size: 0.8rem;">Resolved Officer Name</label>
+                                <input type="text" id="dcAuthorityTlName" class="form-control bg-light" readonly placeholder="Team Leader Name">
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Bottom Squad Selector Toggle -->
@@ -114,8 +161,128 @@
         </div>
     </div>
 </div>
+
+<!-- Recent Disconnections Table -->
+<div class="row justify-content-center mt-4">
+    <div class="col-lg-10 col-xl-9">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                    <h6 class="fw-bold mb-0 text-dark">
+                        <i class="fa-solid fa-list-check text-danger me-2"></i>Recent Disconnection Entries
+                    </h6>
+                    <div class="small text-muted" style="font-size: 0.75rem;">
+                        Showing latest 5 entries. Use search or date export below.
+                    </div>
+                </div>
+                <!-- Search & Export Controls -->
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <!-- Search by VCR Number -->
+                    <div class="input-group input-group-sm" style="max-width: 220px;">
+                        <input type="text" id="dcSearchVcr" class="form-control" placeholder="Search VCR No...">
+                        <button class="btn btn-outline-danger" type="button" id="btnSearchDcVcr" title="Search">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" id="btnClearDcSearch" title="Clear">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <!-- Date-to-Date Excel Export -->
+                    <div class="d-flex align-items-center gap-1">
+                        <input type="date" id="dcExportStartDate" class="form-control form-control-sm" style="width: 125px;" title="Export Start Date">
+                        <span class="small text-muted">to</span>
+                        <input type="date" id="dcExportEndDate" class="form-control form-control-sm" style="width: 125px;" title="Export End Date">
+                        <button class="btn btn-sm btn-success fw-semibold" type="button" id="btnExportDcExcel" title="Export to Excel">
+                            <i class="fa-solid fa-file-excel me-1"></i> Export
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm align-middle mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date</th>
+                            <th>VCR Number</th>
+                            <th>Squad & Circle</th>
+                            <th>Officer Code</th>
+                            <th>Amount Pending</th>
+                            <th>Lock Status</th>
+                            <th class="text-end" id="dcActionsHeader">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentDcTbody">
+                        <tr><td colspan="7" class="text-center text-muted py-3">Loading recent disconnections...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Duplicate VCR Warning Confirmation Modal -->
+<div class="modal fade" id="duplicateVcrModal" tabindex="-1" aria-labelledby="duplicateVcrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-warning bg-opacity-25 border-bottom border-warning">
+                <h5 class="modal-title fw-bold text-dark" id="duplicateVcrModalLabel">
+                    <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>Duplicate VCR Detected
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <p class="mb-2 text-dark" id="duplicateVcrModalMsg">
+                    This VCR Number has already been recorded.
+                </p>
+                <div class="alert alert-light border small text-muted mb-0" id="duplicateVcrDetails">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-top">
+                <button type="button" class="btn btn-secondary btn-sm px-3" data-bs-dismiss="modal" id="btnCancelDuplicate">
+                    <i class="fa-solid fa-xmark me-1"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-warning btn-sm px-3 fw-bold text-dark" id="btnConfirmDuplicate">
+                    <i class="fa-solid fa-check me-1"></i> Yes, Proceed and Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_scripts %}
 <script src="/static/js/dc.js"></script>
+
+<!-- Duplicate VCR Warning Confirmation Modal -->
+<div class="modal fade" id="duplicateVcrModal" tabindex="-1" aria-labelledby="duplicateVcrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-warning bg-opacity-25 border-bottom border-warning">
+                <h5 class="modal-title fw-bold text-dark" id="duplicateVcrModalLabel">
+                    <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>Duplicate VCR Detected
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <p class="mb-2 text-dark" id="duplicateVcrModalMsg">
+                    This VCR Number has already been recorded.
+                </p>
+                <div class="alert alert-light border small text-muted mb-0" id="duplicateVcrDetails">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-top">
+                <button type="button" class="btn btn-secondary btn-sm px-3" data-bs-dismiss="modal" id="btnCancelDuplicate">
+                    <i class="fa-solid fa-xmark me-1"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-warning btn-sm px-3 fw-bold text-dark" id="btnConfirmDuplicate">
+                    <i class="fa-solid fa-check me-1"></i> Yes, Proceed and Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

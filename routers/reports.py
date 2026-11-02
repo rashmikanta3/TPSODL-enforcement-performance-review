@@ -16,7 +16,15 @@ import reports_pdf
 router = APIRouter()
 
 # =========================================================================
-# 1. FORM D ATTENDANCE REGISTER
+# HELPERS
+# =========================================================================
+def _month_range(year: int, month: int):
+    _, last_day = calendar.monthrange(year, month)
+    return date(year, month, 1), date(year, month, last_day)
+
+
+# =========================================================================
+# 1. FORM D ATTENDANCE REGISTER  (employees listed team-wise, sorted)
 # =========================================================================
 @router.get("/form-d")
 def export_form_d(
@@ -28,7 +36,9 @@ def export_form_d(
     db: Session = Depends(get_db)
 ):
     circle_up = circle_name.strip().upper()
-    emp_q = db.query(Employee).filter(Employee.circle == circle_up, Employee.is_active == True)
+    emp_q = db.query(Employee, Team.name.label("team_name"))\
+        .outerjoin(Team, Employee.team_id == Team.id)\
+        .filter(Employee.circle == circle_up, Employee.is_active == True)
     team_name = None
     team_lead = None
     if team_id:
@@ -38,42 +48,46 @@ def export_form_d(
             team_name = t.name
             team_lead = t.assigned_team_lead
 
-    employees_db = emp_q.order_by(Employee.name).all()
+    # Team-wise order: all members of a team together, teams A-Z (unassigned last), names A-Z inside a team
+    employees_db = emp_q.order_by(Team.name.is_(None), Team.name, Employee.name).all()
     if not employees_db:
         raise HTTPException(status_code=404, detail="No employees found for this circle/squad")
 
     emp_list = [
-        {"id": e.id, "emp_code": e.emp_code, "name": e.name, "designation": e.designation or "Squad Member"}
-        for e in employees_db
+        {
+            "id": e.id,
+            "emp_code": e.emp_code,
+            "name": e.name,
+            "designation": e.designation or "Squad Member",
+            "team_name": tm_name or "UNASSIGNED",
+        }
+        for e, tm_name in employees_db
     ]
-    emp_id_to_code = {e["id"]: e["emp_code"] for e in emp_list}
+    emp_ids = [e["id"] for e in emp_list]
 
-    # Fetch daily operations & attendance for this month
-    ops = db.query(DailyTeamOperation).filter(
-        extract('year', DailyTeamOperation.operation_date) == year,
-        extract('month', DailyTeamOperation.operation_date) == month
-    ).all()
-    op_ids = [op.id for op in ops]
+    # Attendance for this month, keyed as (employee_id, "YYYY-MM-DD") which the PDF/Excel builders read
+    month_start, month_end = _month_range(year, month)
+    att_records = db.query(Attendance.employee_id, Attendance.status, DailyTeamOperation.operation_date)\
+        .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)\
+        .filter(
+            Attendance.employee_id.in_(emp_ids),
+            DailyTeamOperation.operation_date >= month_start,
+            DailyTeamOperation.operation_date <= month_end,
+        ).all()
 
-    attendance_map = {e["emp_code"]: {} for e in emp_list}
-    if op_ids:
-        att_records = db.query(Attendance, DailyTeamOperation.operation_date)\
-            .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)\
-            .filter(Attendance.operation_id.in_(op_ids)).all()
-
-        for att, op_date in att_records:
-            emp_code = emp_id_to_code.get(att.employee_id)
-            if emp_code and emp_code in attendance_map:
-                attendance_map[emp_code][op_date.day] = att.status
+    attendance_map = {}
+    for emp_id, status, op_date in att_records:
+        if status:
+            attendance_map[(emp_id, op_date.strftime("%Y-%m-%d"))] = status
 
     # Populate Sundays as WO by default if missing
     _, num_days = calendar.monthrange(year, month)
     for day in range(1, num_days + 1):
         d_obj = date(year, month, day)
         if d_obj.weekday() == 6:  # Sunday
-            for emp_code in attendance_map:
-                if day not in attendance_map[emp_code]:
-                    attendance_map[emp_code][day] = "WO"
+            key_date = d_obj.strftime("%Y-%m-%d")
+            for emp_id in emp_ids:
+                attendance_map.setdefault((emp_id, key_date), "WO")
 
     if format.lower() == "pdf":
         file_bytes = reports_pdf.build_form_d_pdf(
@@ -105,6 +119,7 @@ def export_form_d(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename=Form_D_{circle_up}_{month}_{year}.xlsx"}
         )
+
 
 # =========================================================================
 # 2. VEHICLE LOG SUMMARY
@@ -218,7 +233,7 @@ def export_vehicle_log(
         return Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=Circle_Vehicle_Summary_{circle_up}_{month}_{year}.xlsx"})
 
 # =========================================================================
-# 3. SQUAD PERFORMANCE REGISTER
+# 3. SQUAD PERFORMANCE REGISTER  (one row per team for the month, no date column)
 # =========================================================================
 @router.get("/squad-performance")
 def export_squad_performance(
@@ -229,7 +244,7 @@ def export_squad_performance(
     db: Session = Depends(get_db)
 ):
     circle_up = circle_name.strip().upper()
-    teams = db.query(Team).filter(Team.circle == circle_up, Team.is_active == True).all()
+    teams = db.query(Team).filter(Team.circle == circle_up, Team.is_active == True).order_by(Team.name).all()
 
     # Load Bookings by team
     lb_map = dict(db.query(
@@ -273,24 +288,33 @@ def export_squad_performance(
         extract('month', VehicleLogBook.date) == month
     ).group_by(VehicleLogBook.team_id).all())
 
+    # Employee present man-days by team (count of 'P' marks in the month)
+    present_map = dict(db.query(
+        Employee.team_id,
+        func.count(Attendance.employee_id)
+    ).join(Employee, Attendance.employee_id == Employee.id)
+     .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)
+     .filter(
+        Employee.circle == circle_up,
+        Attendance.status == "P",
+        extract('year', DailyTeamOperation.operation_date) == year,
+        extract('month', DailyTeamOperation.operation_date) == month
+    ).group_by(Employee.team_id).all())
+
     performance_rows = []
     for idx, t in enumerate(teams, start=1):
-        load_kw = round(float(lb_map.get(t.id, 0.0)), 2)
-        coll_inr = round(float(coll_map.get(t.name, 0.0)), 2)
         dc_count, dc_amt = dc_map.get(t.id, (0, 0.0))
-        km_run = int(km_map.get(t.id, 0))
-
         performance_rows.append({
             "sl_no": idx,
             "team_name": t.name,
             "assigned_team_lead": t.assigned_team_lead or "N/A",
             "supervisor_name": t.supervisor_name or "N/A",
-            "load_booked_kw": load_kw,
-            "amount_collected": coll_inr,
-            "dc_count": dc_count,
+            "load_booked_kw": round(float(lb_map.get(t.id, 0.0) or 0.0), 2),
+            "amount_collected": round(float(coll_map.get(t.name, 0.0) or 0.0), 2),
+            "dc_count": int(dc_count or 0),
             "dc_amount": round(dc_amt, 2),
-            "km_run": km_run,
-            "remarks": ""
+            "km_run": int(km_map.get(t.id, 0) or 0),
+            "emp_present_count": int(present_map.get(t.id, 0) or 0),
         })
 
     if format.lower() == "pdf":
@@ -311,7 +335,7 @@ def export_squad_performance(
         return Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=Squad_Performance_{circle_up}_{month}_{year}.xlsx"})
 
 # =========================================================================
-# 4. FIELD COLLECTION REGISTER
+# 4. MR COLLECTION REGISTER  (every MR entry of the month)
 # =========================================================================
 @router.get("/collection")
 def export_collection(
@@ -326,20 +350,17 @@ def export_collection(
         Collection.circle == circle_up,
         extract('year', Collection.payment_date) == year,
         extract('month', Collection.payment_date) == month
-    ).order_by(Collection.payment_date, Collection.mr_number).all()
+    ).order_by(Collection.payment_date, Collection.id).all()
 
     records = [
         {
-            "payment_date": c.payment_date,
-            "mr_number": c.mr_number,
             "vcr_number": c.vcr_number or "-",
-            "amount_paid": c.amount_paid,
-            "collected_by": getattr(c, "collected_by_name", None) or getattr(c, "collected_by_emp_id", None) or "-",
-            "team_name": c.team_name,
-            "circle": c.circle,
+            "mr_number": c.mr_number or "-",
+            "payment_date": c.payment_date,
             "division": c.division or "-",
             "subdivision": c.subdivision or "-",
-            "section": c.section or "-"
+            "section": c.section or "-",
+            "amount_paid": float(c.amount_paid or 0.0),
         }
         for c in collections
     ]
@@ -351,7 +372,7 @@ def export_collection(
             month=month,
             records=records
         )
-        return Response(content=file_bytes, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Collections_{circle_up}_{month}_{year}.pdf"})
+        return Response(content=file_bytes, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=MR_Collection_{circle_up}_{month}_{year}.pdf"})
     else:
         file_bytes = reports_excel.build_collection_excel(
             circle_name=circle_up,
@@ -359,24 +380,15 @@ def export_collection(
             month=month,
             records=records
         )
-        return Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=Collections_{circle_up}_{month}_{year}.xlsx"})
-
+        return Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=MR_Collection_{circle_up}_{month}_{year}.xlsx"})
 
 
 # =========================================================================
-# 6. ALL LOAD BOOKINGS REGISTER (EXCEL & PDF)
+# 6. LOAD BOOKING REGISTER (EXCEL & PDF) - every booking entry of the month
+#    Pass year & month (defaults to current month). from_date / to_date, if
+#    given, override the month and export that exact range instead.
 # =========================================================================
-@router.get("/load-bookings/excel")
-def export_load_bookings_excel(
-    circle: Optional[str] = None,
-    from_date: Optional[date] = None,
-    to_date: Optional[date] = None,
-    db: Session = Depends(get_db)
-):
-    """
-    Exports all unauthorized load bookings to a formatted, tamper-proof, password-protected Excel (.xlsx) file.
-    Includes =SUM() formula for Booked Load (kW).
-    """
+def _load_booking_entries(db: Session, circle, year, month, from_date, to_date):
     q = db.query(
         LoadBooking,
         TeamLead.name.label("tl_name"),
@@ -391,12 +403,20 @@ def export_load_bookings_excel(
             c_clean = "BERHAMPUR CITY"
         q = q.filter(LoadBooking.circle == c_clean)
 
-    if from_date:
-        q = q.filter(LoadBooking.booking_date >= from_date)
-    if to_date:
-        q = q.filter(LoadBooking.booking_date <= to_date)
+    if from_date or to_date:
+        if from_date:
+            q = q.filter(LoadBooking.booking_date >= from_date)
+        if to_date:
+            q = q.filter(LoadBooking.booking_date <= to_date)
+        period_label = None
+    else:
+        year = year or date.today().year
+        month = month or date.today().month
+        m_start, m_end = _month_range(year, month)
+        q = q.filter(LoadBooking.booking_date >= m_start, LoadBooking.booking_date <= m_end)
+        period_label = f"{calendar.month_name[month].upper()} {year}"
 
-    records_db = q.order_by(LoadBooking.booking_date.desc(), LoadBooking.id.desc()).all()
+    records_db = q.order_by(LoadBooking.booking_date.asc(), LoadBooking.id.asc()).all()
 
     bookings = [
         {
@@ -416,81 +436,59 @@ def export_load_bookings_excel(
         }
         for b, tl_name, team_name in records_db
     ]
+    return bookings, period_label
 
+
+def _lb_filename(circle, period_label, ext):
+    tag = (period_label or str(date.today())).replace(" ", "_")
+    return f"Load_Bookings_{(circle or 'ALL').upper()}_{tag}.{ext}"
+
+
+@router.get("/load-bookings/excel")
+def export_load_bookings_excel(
+    circle: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    db: Session = Depends(get_db)
+):
+    """Exports every load booking entry of the month to a protected Excel (.xlsx) register."""
+    bookings, period_label = _load_booking_entries(db, circle, year, month, from_date, to_date)
     file_bytes = reports_excel.build_load_booking_excel(
         bookings=bookings,
         circle=circle,
         from_date=from_date,
-        to_date=to_date
+        to_date=to_date,
+        period_label=period_label
     )
-
-    filename = f"Load_Bookings_{(circle or 'ALL').upper()}_{date.today()}.xlsx"
     return Response(
         content=file_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f"attachment; filename={_lb_filename(circle, period_label, 'xlsx')}"}
     )
+
 
 @router.get("/load-bookings/pdf")
 def export_load_bookings_pdf(
     circle: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
     db: Session = Depends(get_db)
 ):
-    """
-    Exports all unauthorized load bookings to an official A4 landscape ReportLab PDF.
-    """
-    q = db.query(
-        LoadBooking,
-        TeamLead.name.label("tl_name"),
-        Team.name.label("team_name")
-    )\
-    .outerjoin(TeamLead, LoadBooking.tl_code == TeamLead.tl_code)\
-    .outerjoin(Team, LoadBooking.team_id == Team.id)
-
-    if circle and circle.strip().upper() not in ("ALL", ""):
-        c_clean = circle.strip().upper()
-        if c_clean == "CITY":
-            c_clean = "BERHAMPUR CITY"
-        q = q.filter(LoadBooking.circle == c_clean)
-
-    if from_date:
-        q = q.filter(LoadBooking.booking_date >= from_date)
-    if to_date:
-        q = q.filter(LoadBooking.booking_date <= to_date)
-
-    records_db = q.order_by(LoadBooking.booking_date.desc(), LoadBooking.id.desc()).all()
-
-    bookings = [
-        {
-            "id": b.id,
-            "booking_date": b.booking_date,
-            "page_no": b.page_no or "-",
-            "punch_emp": tl_name or b.tl_code or "N/A",
-            "team_name": team_name or "Unassigned",
-            "circle": b.circle,
-            "division": b.division or "-",
-            "subdivision": b.subdivision or "-",
-            "section": b.section or "-",
-            "pincode": b.pincode or "-",
-            "theft_type": b.theft_type,
-            "booked_load": b.booked_load,
-            "status": b.status
-        }
-        for b, tl_name, team_name in records_db
-    ]
-
+    """Exports every load booking entry of the month to an A4 landscape PDF register."""
+    bookings, period_label = _load_booking_entries(db, circle, year, month, from_date, to_date)
     file_bytes = reports_pdf.build_load_booking_pdf(
         bookings=bookings,
         circle=circle,
         from_date=from_date,
-        to_date=to_date
+        to_date=to_date,
+        period_label=period_label
     )
-
-    filename = f"Load_Bookings_{(circle or 'ALL').upper()}_{date.today()}.pdf"
     return Response(
         content=file_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f"attachment; filename={_lb_filename(circle, period_label, 'pdf')}"}
     )

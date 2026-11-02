@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import init_db, get_db, SessionLocal
 from models import User, Team, Employee, VCRMaster
-from auth import get_current_user_optional, get_token_from_request
+from auth import get_current_user_optional, get_token_from_request, decode_token
 
 # Import Routers
 from routers.auth import router as auth_router
@@ -89,22 +89,59 @@ def load_booking_page(request: Request):
 def dc_page(request: Request):
     return templates.TemplateResponse(request=request, name="dc.html", context={"active_page": "dc"})
 
-@app.get("/collection", response_class=HTMLResponse)
-def collection_page(request: Request):
+
+def check_page_access(request: Request, db: Session, allowed_roles: list[str]):
+    """Redirects users whose role is not in allowed_roles (e.g. USER on VCR/Collection) to dashboard."""
+    role_hdr = request.headers.get("x-user-role")
+    if role_hdr and role_hdr.strip().upper() not in allowed_roles:
+        return RedirectResponse(url="/dashboard?error=access_denied", status_code=303)
+
+    token = None
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    elif request.cookies.get("access_token"):
+        ck = request.cookies.get("access_token")
+        token = ck[7:].strip() if ck.startswith("Bearer ") else ck.strip()
+
+    if token:
+        payload = decode_token(token)
+        if payload:
+            role = payload.get("role")
+            if role and role.strip().upper() not in allowed_roles:
+                return RedirectResponse(url="/dashboard?error=access_denied", status_code=303)
+            sub = payload.get("sub")
+            if sub:
+                user = db.query(User).filter(User.username == sub, User.is_active == True).first()
+                if user and user.role not in allowed_roles:
+                    return RedirectResponse(url="/dashboard?error=access_denied", status_code=303)
+    return None
+
+@app.get("/collection")
+def collection_page(request: Request, db: Session = Depends(get_db)):
+    guard = check_page_access(request, db, allowed_roles=["ADMIN", "SUB_ADMIN"])
+    if guard:
+        return guard
     return templates.TemplateResponse(request=request, name="collection.html", context={"active_page": "collection"})
 
 @app.get("/reports", response_class=HTMLResponse)
 def reports_page(request: Request):
     return templates.TemplateResponse(request=request, name="reports.html", context={"active_page": "reports"})
 
-@app.get("/vcr-desk", response_class=HTMLResponse)
-@app.get("/vcr", response_class=HTMLResponse)
-def vcr_page(request: Request):
+@app.get("/vcr-desk")
+@app.get("/vcr")
+def vcr_page(request: Request, db: Session = Depends(get_db)):
+    guard = check_page_access(request, db, allowed_roles=["ADMIN", "SUB_ADMIN"])
+    if guard:
+        return guard
     return templates.TemplateResponse(request=request, name="vcr.html", context={"active_page": "vcr"})
 
-@app.get("/admin-desk", response_class=HTMLResponse)
-@app.get("/admin", response_class=HTMLResponse)
-def admin_desk(request: Request):
+@app.get("/admin-desk")
+@app.get("/admin")
+def admin_desk(request: Request, db: Session = Depends(get_db)):
+    guard = check_page_access(request, db, allowed_roles=["ADMIN"])
+    if guard:
+        return guard
     return templates.TemplateResponse(request=request, name="admin.html", context={"request": request, "active_page": "admin"})
 
 @app.get("/profile", response_class=HTMLResponse)

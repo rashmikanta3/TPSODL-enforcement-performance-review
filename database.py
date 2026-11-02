@@ -58,87 +58,43 @@ def get_db():
         db.close()
 
 def sync_table_columns():
-    """Applies column migrations if columns don't yet exist in the target database."""
+    """Applies column migrations safely if columns don't yet exist in the target database."""
+    is_pg = "postgres" in active_db_url
+    migrations = [
+        ("users", "team_id", "INTEGER REFERENCES teams(id) ON DELETE SET NULL" if is_pg else "INTEGER"),
+        ("daily_team_operations", "is_locked", "BOOLEAN NOT NULL DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("attendance", "is_locked", "BOOLEAN NOT NULL DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("vehicle_log_books", "is_locked", "BOOLEAN NOT NULL DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("load_bookings", "is_locked", "BOOLEAN NOT NULL DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("disconnection_records", "is_locked", "BOOLEAN NOT NULL DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("vcr_masters", "subdivision", "VARCHAR(100)"),
+        ("vcr_masters", "inspection_date", "DATE"),
+        ("daily_team_operations", "tl_name", "VARCHAR(100)"),
+        ("daily_team_operations", "is_team_active", "BOOLEAN DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("daily_team_operations", "operating_with_tl", "BOOLEAN DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("load_bookings", "page_no", "VARCHAR(50)"),
+        ("load_bookings", "book_number", "VARCHAR(50)"),
+        ("load_bookings", "vcr_number", "VARCHAR(50)"),
+        ("teams", "has_vehicle", "BOOLEAN DEFAULT TRUE" if is_pg else "BOOLEAN DEFAULT 1"),
+        ("teams", "is_office_team", "BOOLEAN DEFAULT FALSE" if is_pg else "BOOLEAN DEFAULT 0"),
+    ]
     with engine.connect() as conn:
-        # 1. vcr_masters subdivision
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE vcr_masters ADD COLUMN IF NOT EXISTS subdivision VARCHAR(100)"))
-            else:
-                conn.execute(text("ALTER TABLE vcr_masters ADD COLUMN subdivision VARCHAR(100)"))
-            conn.commit()
-        except Exception:
-            pass
+        for tbl, col, col_type in migrations:
+            try:
+                if is_pg:
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+                else:
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
 
-        # 2. daily_team_operations tl_name
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN IF NOT EXISTS tl_name VARCHAR(100)"))
-            else:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN tl_name VARCHAR(100)"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 3. is_team_active
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN IF NOT EXISTS is_team_active BOOLEAN DEFAULT TRUE"))
-            else:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN is_team_active BOOLEAN DEFAULT 1"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 4. operating_with_tl
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN IF NOT EXISTS operating_with_tl BOOLEAN DEFAULT TRUE"))
-            else:
-                conn.execute(text("ALTER TABLE daily_team_operations ADD COLUMN operating_with_tl BOOLEAN DEFAULT 1"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 5. load_bookings page_no
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE load_bookings ADD COLUMN IF NOT EXISTS page_no VARCHAR(50)"))
-            else:
-                conn.execute(text("ALTER TABLE load_bookings ADD COLUMN page_no VARCHAR(50)"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 6. load_bookings book_number
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE load_bookings ADD COLUMN IF NOT EXISTS book_number VARCHAR(50)"))
-            else:
-                conn.execute(text("ALTER TABLE load_bookings ADD COLUMN book_number VARCHAR(50)"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 7. users circle length (ensure VARCHAR(255) for multi-circle assignment)
-        try:
-            if "postgres" in active_db_url:
+        if is_pg:
+            try:
                 conn.execute(text("ALTER TABLE users ALTER COLUMN circle TYPE VARCHAR(255)"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # 8. teams has_vehicle and is_office_team
-        try:
-            if "postgres" in active_db_url:
-                conn.execute(text("ALTER TABLE teams ADD COLUMN IF NOT EXISTS has_vehicle BOOLEAN DEFAULT TRUE"))
-                conn.execute(text("ALTER TABLE teams ADD COLUMN IF NOT EXISTS is_office_team BOOLEAN DEFAULT FALSE"))
-            else:
-                conn.execute(text("ALTER TABLE teams ADD COLUMN has_vehicle BOOLEAN DEFAULT 1"))
-                conn.execute(text("ALTER TABLE teams ADD COLUMN is_office_team BOOLEAN DEFAULT 0"))
-            conn.commit()
-        except Exception:
-            pass
+                conn.commit()
+            except Exception:
+                pass
 
     fix_postgres_sequences()
 
@@ -163,21 +119,7 @@ def fix_postgres_sequences():
 def reset_db():
     """Cleanly drops all tables and recreates them with fresh schema."""
     import models  # noqa: F401
-    with engine.connect() as conn:
-        if "postgres" in active_db_url:
-            table_names = [
-                "attendance", "daily_team_operations", "load_bookings",
-                "disconnection_records", "vcr_masters", "collections",
-                "vehicle_log_books", "employees", "teams", "team_leads", "users"
-            ]
-            for tbl in table_names:
-                try:
-                    conn.execute(text(f"DROP TABLE IF EXISTS {tbl} CASCADE"))
-                    conn.commit()
-                except Exception:
-                    pass
-        else:
-            Base.metadata.drop_all(bind=engine)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
 def init_db(reset: bool = False):
@@ -187,3 +129,4 @@ def init_db(reset: bool = False):
     else:
         Base.metadata.create_all(bind=engine)
         sync_table_columns()
+    fix_postgres_sequences()

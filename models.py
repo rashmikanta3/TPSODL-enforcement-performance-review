@@ -56,8 +56,11 @@ class User(Base):
     password = Column(String(255), nullable=False)
     role = Column(String(20), default="USER", nullable=False)       # ADMIN, SUB_ADMIN, USER
     circle = Column(String(255), nullable=True)                     # Comma-separated assigned circles or null
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     can_edit = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+
+    team = relationship("Team", foreign_keys=[team_id])
 
     def get_assigned_circles(self) -> list[str]:
         return get_assigned_circles(self)
@@ -150,6 +153,7 @@ class DailyTeamOperation(Base):
     # Modes: "INDEPENDENT_WITH_TL", "INDEPENDENT_WITHOUT_TL_COLLECTION", "MERGED", "NON_OPERATIONAL"
     merged_with_team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     remarks = Column(Text, nullable=True)
+    is_locked = Column(Boolean, default=True, nullable=False)
 
     # Legacy attribute alias for daily_tl_id
     daily_team_lead_id = synonym("daily_tl_id")
@@ -177,6 +181,7 @@ class Attendance(Base):
     operation_id = Column(Integer, ForeignKey("daily_team_operations.id", ondelete="CASCADE"), nullable=False)
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(5), default="P", nullable=False)  # P, A, L, WO
+    is_locked = Column(Boolean, default=True, nullable=False)
 
     operation = relationship("DailyTeamOperation", back_populates="attendances")
     employee = relationship("Employee", back_populates="attendances")
@@ -200,6 +205,7 @@ class VehicleLogBook(Base):
     start_time = Column(String(20), nullable=True)
     end_time = Column(String(20), nullable=True)
     area_movement = Column(Text, nullable=True)
+    is_locked = Column(Boolean, default=True, nullable=False)
 
     # Legacy alias synonym
     permanent_team_lead = synonym("assigned_team_lead")
@@ -218,6 +224,7 @@ class LoadBooking(Base):
     booking_date = Column(Date, index=True, nullable=False, default=date.today)
     book_number = Column(String(50), index=True, nullable=True)
     page_no = Column(String(50), index=True, nullable=True)
+    vcr_number = Column(String(50), index=True, nullable=True)
     tl_code = Column(String(50), index=True, nullable=True)  # TPSODL TL Code
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), index=True, nullable=True)
     circle = Column(String(50), index=True, nullable=False)
@@ -228,6 +235,7 @@ class LoadBooking(Base):
     theft_type = Column(String(50), nullable=False)
     booked_load = Column(Float, default=0.0, nullable=False)
     status = Column(String(20), default="PENDING", nullable=False)
+    is_locked = Column(Boolean, default=True, nullable=False)
 
     # Legacy alias / compatibility column
     punch_emp_id = Column(Integer, nullable=True)
@@ -258,7 +266,11 @@ class VCRMaster(Base):
     division = Column(String(50), nullable=True)
     subdivision = Column(String(50), nullable=True)
     section = Column(String(50), nullable=True)
-    provisional_bill_date = Column(Date, nullable=True)
+    inspection_date = Column(Date, nullable=True)
+
+    # Backward-compatibility synonyms
+    provisional_bill_date = synonym("inspection_date")
+    date_of_provisional = synonym("inspection_date")
 
     booking = relationship("LoadBooking", back_populates="vcr_records")
     disconnections = relationship("DisconnectionRecord", back_populates="vcr")
@@ -282,6 +294,7 @@ class DisconnectionRecord(Base):
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), index=True, nullable=True)
     amount_pending = Column(Float, default=0.0, nullable=False)
     remarks = Column(Text, nullable=True)
+    is_locked = Column(Boolean, default=True, nullable=False)
 
     # Legacy compatibility column
     dc_authority_emp_id = Column(Integer, nullable=True)

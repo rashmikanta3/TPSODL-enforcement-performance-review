@@ -23,14 +23,20 @@ def save_logbook(
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
 
+    if current_user:
+        verify_write_permission(current_user, team.circle)
+        if current_user.role == "USER":
+            if not current_user.team_id or current_user.team_id != req.team_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access Denied: You can only record logbook entries for your assigned squad (Team ID: {current_user.team_id})."
+                )
+
     if team.is_office_team or not team.has_vehicle:
         raise HTTPException(
             status_code=400,
             detail=f"Operation not permitted: Squad '{team.name}' is designated as an Office Team (Without Vehicle) and cannot record vehicle logbook kilometer runs."
         )
-
-    if current_user:
-        verify_write_permission(current_user, team.circle)
         
     perm_tl = team.assigned_team_lead or "N/A"
     run_km = req.end_km - req.start_km
@@ -46,7 +52,8 @@ def save_logbook(
         run_km=run_km,
         start_time=req.start_time.strip(),
         end_time=req.end_time.strip(),
-        area_movement=req.area_movement.strip() if req.area_movement else None
+        area_movement=req.area_movement.strip() if req.area_movement else None,
+        is_locked=True
     )
     db.add(entry)
     db.commit()
@@ -65,7 +72,12 @@ def get_eligible_logbook_teams(
         Team.has_vehicle == True,
         Team.is_office_team == False
     )
-    if circle:
+    if current_user and current_user.role == "USER":
+        if current_user.team_id:
+            q = q.filter(Team.id == current_user.team_id)
+        else:
+            q = q.filter(Team.id == -1)
+    elif circle:
         c_up = circle.strip().upper()
         if c_up in ("CITY", "BERHAMPUR CITY"):
             q = q.filter(Team.circle.in_(["CITY", "BERHAMPUR CITY"]))
@@ -93,7 +105,12 @@ def get_recent_logs(
 ):
     q = db.query(VehicleLogBook, Team.name.label("team_name"), Team.circle.label("team_circle")).join(Team, VehicleLogBook.team_id == Team.id)
     
-    if current_user and current_user.role == "SUB_ADMIN":
+    if current_user and current_user.role == "USER":
+        if current_user.team_id:
+            q = q.filter(VehicleLogBook.team_id == current_user.team_id)
+        else:
+            q = q.filter(VehicleLogBook.team_id == -1)
+    elif current_user and current_user.role == "SUB_ADMIN":
         allowed = get_assigned_circles(current_user)
         expanded = list(allowed)
         if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:
@@ -139,6 +156,60 @@ def get_recent_logs(
             "run_km": log.run_km,
             "start_time": log.start_time,
             "end_time": log.end_time,
-            "area_movement": log.area_movement or ""
+            "area_movement": log.area_movement or "",
+            "is_locked": bool(getattr(log, "is_locked", True))
         })
     return out
+
+@router.delete("/{log_id}")
+def delete_logbook(
+    log_id: int,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    entry = db.query(VehicleLogBook).filter(VehicleLogBook.id == log_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Log book entry not found")
+    if not current_user or current_user.role == "USER":
+        raise HTTPException(
+            status_code=403,
+            detail="This record is locked after submission. Contact your Circle Admin or MIS In-Charge to make corrections."
+        )
+    if current_user.role == "SUB_ADMIN":
+        if entry.team and not is_circle_authorized(current_user, entry.team.circle):
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have permissions for this circle.")
+        if not current_user.can_edit:
+            raise HTTPException(status_code=403, detail="View-only Sub-Admin account cannot delete records.")
+
+    db.delete(entry)
+    db.commit()
+    return {"success": True, "id": log_id, "message": "Log book entry deleted successfully"}
+
+@router.patch("/{log_id}/toggle-lock")
+def toggle_log_lock(
+    log_id: int,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    if not current_user or current_user.role not in ["ADMIN", "SUB_ADMIN"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Only Admins and Sub-Admins can lock or unlock vehicle log book records."
+        )
+    entry = db.query(VehicleLogBook).filter(VehicleLogBook.id == log_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Log book entry not found")
+    if current_user.role == "SUB_ADMIN" and entry.team and not is_circle_authorized(current_user, entry.team.circle):
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have permissions for this circle.")
+
+    entry.is_locked = not bool(getattr(entry, "is_locked", True))
+    db.commit()
+    db.refresh(entry)
+    state_str = "locked" if entry.is_locked else "unlocked"
+    return {
+        "success": True,
+        "id": entry.id,
+        "is_locked": bool(entry.is_locked),
+        "message": f"Vehicle Log Book record {state_str} successfully"
+    }
+

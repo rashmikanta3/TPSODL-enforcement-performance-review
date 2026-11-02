@@ -17,6 +17,8 @@ class UserResponse(BaseModel):
     username: str
     role: str
     circle: Optional[str] = None
+    team_id: Optional[int] = None
+    team_name: Optional[str] = None
     can_edit: bool = False
     is_active: bool = True
 
@@ -93,12 +95,14 @@ class CreateUserRequest(BaseModel):
     password: str
     role: str
     circle: Optional[str] = None
+    team_id: Optional[int] = None
     can_edit: bool = False
 
 class UpdateUserRequest(BaseModel):
     password: Optional[str] = None
     role: Optional[str] = None
     circle: Optional[str] = None
+    team_id: Optional[int] = None
     can_edit: Optional[bool] = None
     is_active: Optional[bool] = None
 
@@ -112,7 +116,9 @@ class VCRMasterCreate(BaseModel):
     division: Optional[str] = None
     subdivision: Optional[str] = None
     section: Optional[str] = None
+    inspection_date: Optional[date] = None
     provisional_bill_date: Optional[date] = None
+    date_of_provisional: Optional[date] = None
 
 # --- Attendance Schemas (Form D Register - BA Staff Only) ---
 class EmpAttendanceItem(BaseModel):
@@ -162,6 +168,8 @@ class LoadBookingRequest(BaseModel):
     theft_type: str = Field(..., description="Hooking, Meter Tamper, Bypass, Misuse")
     booked_load: float = Field(..., gt=0.0, le=100.0)
     status: Optional[str] = "PENDING"
+    vcr_number: Optional[str] = None
+    allow_duplicate: Optional[bool] = False
 
 # --- Disconnection Schemas ---
 class DCPunchRequest(BaseModel):
@@ -172,6 +180,7 @@ class DCPunchRequest(BaseModel):
     dc_authority_emp_id: Optional[str] = None  # Legacy alias
     team_id: Optional[int] = None
     remarks: Optional[str] = None
+    allow_duplicate: Optional[bool] = False
 
 # --- Collection Schemas (Standalone Register) ---
 class CollectionRow(BaseModel):

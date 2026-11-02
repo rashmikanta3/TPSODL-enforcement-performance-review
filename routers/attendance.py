@@ -16,14 +16,18 @@ def get_teams_by_circle(
     db: Session = Depends(get_db)
 ):
     c_up = circle.strip().upper()
-    if current_user and current_user.role == "SUB_ADMIN" and not is_circle_authorized(current_user, c_up):
+    if current_user and current_user.role == "USER":
+        # Strict squad isolation
+        if current_user.team_id:
+            teams = db.query(Team).filter(Team.id == current_user.team_id, Team.is_active == True).all()
+        else:
+            teams = []
+    elif current_user and current_user.role == "SUB_ADMIN" and not is_circle_authorized(current_user, c_up):
         raise HTTPException(
             status_code=403,
             detail=f"Unauthorized: You do not have permissions for circle: {circle}"
         )
-
-    # Handle CITY / BERHAMPUR CITY
-    if c_up in ("CITY", "BERHAMPUR CITY"):
+    elif c_up in ("CITY", "BERHAMPUR CITY"):
         teams = db.query(Team).filter(Team.circle.in_(["CITY", "BERHAMPUR CITY"]), Team.is_active == True).order_by(Team.name).all()
     else:
         teams = db.query(Team).filter(Team.circle == c_up, Team.is_active == True).order_by(Team.name).all()
@@ -121,6 +125,7 @@ def get_daily_status(operation_date: date, team_id: int, db: Session = Depends(g
         "operation_mode": op.operation_mode,
         "merged_with_team_id": op.merged_with_team_id,
         "remarks": op.remarks or "",
+        "is_locked": getattr(op, "is_locked", True),
         "attendance": att_map
     }
 
@@ -133,7 +138,12 @@ def get_active_squads(
 ):
     teams_q = db.query(Team).filter(Team.is_active == True)
     
-    if current_user and current_user.role == "SUB_ADMIN":
+    if current_user and current_user.role == "USER":
+        if current_user.team_id:
+            teams_q = teams_q.filter(Team.id == current_user.team_id)
+        else:
+            teams_q = teams_q.filter(Team.id == -1)
+    elif current_user and current_user.role == "SUB_ADMIN":
         allowed = get_assigned_circles(current_user)
         expanded = list(allowed)
         if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:
@@ -209,6 +219,12 @@ def save_daily_attendance(
 
     if current_user:
         verify_write_permission(current_user, target_circle)
+        if current_user.role == "USER":
+            if not current_user.team_id or current_user.team_id != req.team_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access Denied: You are only authorized to submit attendance for your assigned squad (Team ID: {current_user.team_id})."
+                )
 
     # Determine mode based on inputs & team vehicle configuration
     is_office = bool(team and (team.is_office_team or not team.has_vehicle))
@@ -251,6 +267,13 @@ def save_daily_attendance(
         DailyTeamOperation.team_id == req.team_id
     ).first()
 
+    if op and getattr(op, "is_locked", False):
+        if current_user and current_user.role == "USER":
+            raise HTTPException(
+                status_code=403,
+                detail="This record is locked after submission. Contact your Circle Admin or MIS In-Charge to make corrections."
+            )
+
     if not op:
         op = DailyTeamOperation(
             operation_date=req.operation_date,
@@ -261,7 +284,8 @@ def save_daily_attendance(
             operating_with_tl=req.operating_with_tl,
             operation_mode=final_mode,
             merged_with_team_id=req.merged_with_team_id if final_mode == "MERGED" else None,
-            remarks=req.remarks.strip() if req.remarks else None
+            remarks=req.remarks.strip() if req.remarks else None,
+            is_locked=True
         )
         db.add(op)
         db.flush()
@@ -273,6 +297,7 @@ def save_daily_attendance(
         op.operation_mode = final_mode
         op.merged_with_team_id = req.merged_with_team_id if final_mode == "MERGED" else None
         op.remarks = req.remarks.strip() if req.remarks else None
+        op.is_locked = True
         db.query(Attendance).filter(Attendance.operation_id == op.id).delete()
 
     # Save BA squad members' attendance (TL does not punch in this portal)
@@ -280,7 +305,8 @@ def save_daily_attendance(
         db.add(Attendance(
             operation_id=op.id,
             employee_id=item.employee_id,
-            status=item.status
+            status=item.status,
+            is_locked=True
         ))
 
     db.commit()
@@ -290,3 +316,34 @@ def save_daily_attendance(
         "mode": final_mode,
         "final_mode": final_mode
     }
+
+@router.patch("/operation/{operation_id}/toggle-lock")
+def toggle_operation_lock(
+    operation_id: int,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    """Allows Circle Sub-Admin or System Admin to toggle the lock state of an attendance submission."""
+    if not current_user or current_user.role not in ["ADMIN", "SUB_ADMIN"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Only Admins and Sub-Admins can lock or unlock attendance entries."
+        )
+    op = db.query(DailyTeamOperation).filter(DailyTeamOperation.id == operation_id).first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Daily operation record not found")
+    if current_user.role == "SUB_ADMIN" and op.team and not is_circle_authorized(current_user, op.team.circle):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not authorized for this circle.")
+
+    op.is_locked = not bool(getattr(op, "is_locked", True))
+    db.query(Attendance).filter(Attendance.operation_id == op.id).update({"is_locked": op.is_locked})
+    db.commit()
+    db.refresh(op)
+    state_str = "locked" if op.is_locked else "unlocked"
+    return {
+        "success": True,
+        "operation_id": op.id,
+        "is_locked": bool(op.is_locked),
+        "message": f"Daily Operation record {state_str} successfully"
+    }
+

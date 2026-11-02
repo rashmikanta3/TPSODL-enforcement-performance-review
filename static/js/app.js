@@ -164,7 +164,13 @@ function enforceRouteAccess() {
 
     // Restrict /admin-desk strictly to ADMIN role
     if ((path === '/admin-desk' || path === '/admin') && user && user.role !== 'ADMIN') {
-        window.location.href = '/dashboard';
+        window.location.href = '/dashboard?error=access_denied';
+        return;
+    }
+
+    // Issue 3: Restrict VCR & Collection bulk upload strictly to ADMIN & SUB_ADMIN
+    if ((path === '/vcr-desk' || path === '/vcr' || path === '/collection') && user && user.role === 'USER') {
+        window.location.href = '/dashboard?error=access_denied';
         return;
     }
 }
@@ -221,6 +227,17 @@ function updateNavUser() {
             adminNav.style.display = (user.role === 'ADMIN') ? 'block' : 'none';
         }
 
+        // Issue 3: Hide VCR and Collection bulk uploads from standard squad field users
+        const vcrNav = document.getElementById('navVcrItem');
+        const collNav = document.getElementById('navCollectionItem');
+        if (user.role === 'USER') {
+            if (vcrNav) vcrNav.style.display = 'none';
+            if (collNav) collNav.style.display = 'none';
+        } else {
+            if (vcrNav) vcrNav.style.display = 'block';
+            if (collNav) collNav.style.display = 'block';
+        }
+
         // Check if Sub-Admin is view-only (can_edit == false)
         if (user.role === 'SUB_ADMIN' && !user.can_edit) {
             applyViewOnlyRestrictions();
@@ -270,8 +287,37 @@ function logout() {
     window.location.href = '/dashboard';
 }
 
+
+
+// Global Helpers for Squad User Isolation & Entry Locking
+window.isSquadUser = function() {
+    const u = getCurrentUser();
+    return u && u.role === 'USER';
+};
+
+window.getUserSquadId = function() {
+    const u = getCurrentUser();
+    return (u && u.team_id) ? u.team_id : null;
+};
+
+window.getUserSquadName = function() {
+    const u = getCurrentUser();
+    return (u && u.team_name) ? u.team_name : null;
+};
+
+function checkAccessDeniedToast() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('error') === 'access_denied') {
+        showToast("Access Denied: Only Circle Sub-Admins and System Admins are authorized to access that desk.", "danger");
+        // Clean URL without reloading
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     enforceRouteAccess();
     updateNavUser();
     interceptOperationalNavLinks();
+    checkAccessDeniedToast();
 });

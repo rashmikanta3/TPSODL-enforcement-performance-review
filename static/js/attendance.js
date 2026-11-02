@@ -46,6 +46,17 @@ async function onAttendanceCircleChange() {
                 return `<option value="${tl}" data-name="${tl}">${tl}</option>`;
             }).join('');
 
+        // Check if user is squad-isolated
+        if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
+            const mySquadId = window.getUserSquadId();
+            if (mySquadId) {
+                teamSelect.value = mySquadId;
+                teamSelect.disabled = true;
+                onDateOrTeamChange();
+                return;
+            }
+        }
+
         // Clear roster table
         document.getElementById('roster-tbody').innerHTML = 
             '<tr><td colspan="4" class="text-center text-muted py-4">Please select a squad from the dropdown above</td></tr>';
@@ -141,11 +152,49 @@ async function checkExistingDailyOperation(opDate, teamId) {
         const banner = document.getElementById('att-status-banner');
 
         if (data.exists) {
+            const isLocked = !!data.is_locked;
+            const isUser = (typeof window.isSquadUser === 'function') && window.isSquadUser();
+
             banner.style.display = 'block';
-            banner.style.backgroundColor = '#ecfdf5';
-            banner.style.color = '#065f46';
-            banner.style.border = '1px solid #a7f3d0';
-            banner.innerHTML = `<i class="fa-solid fa-circle-check me-2"></i><strong>Saved Entry Found:</strong> Squad was recorded as <u>${data.operation_mode.replace(/_/g, ' ')}</u> on this date.`;
+            if (isLocked) {
+                banner.style.backgroundColor = '#f1f5f9';
+                banner.style.color = '#334155';
+                banner.style.border = '1px solid #cbd5e1';
+                banner.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge bg-secondary me-2"><i class="fa-solid fa-lock"></i> Locked</span>
+                            <strong>Saved Entry (Locked):</strong> Squad recorded as <u>${data.operation_mode.replace(/_/g, ' ')}</u> on this date.
+                            <div class="small text-muted mt-1"><i class="fa-solid fa-circle-info me-1"></i>Entries are locked upon submission. For corrections, contact your Circle Admin.</div>
+                        </div>
+                        ${!isUser ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleAttendanceLock(${data.operation_id})"><i class="fa-solid fa-lock-open me-1"></i> Unlock</button>` : ''}
+                    </div>
+                `;
+            } else {
+                banner.style.backgroundColor = '#ecfdf5';
+                banner.style.color = '#065f46';
+                banner.style.border = '1px solid #a7f3d0';
+                banner.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge bg-success me-2"><i class="fa-solid fa-unlock"></i> Unlocked</span>
+                            <strong>Saved Entry Found:</strong> Squad recorded as <u>${data.operation_mode.replace(/_/g, ' ')}</u> on this date.
+                        </div>
+                        ${!isUser ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAttendanceLock(${data.operation_id})"><i class="fa-solid fa-lock me-1"></i> Lock</button>` : ''}
+                    </div>
+                `;
+            }
+
+            const saveBtn = document.getElementById('save-att-btn');
+            if (saveBtn) {
+                if (isUser && isLocked) {
+                    saveBtn.disabled = true;
+                    saveBtn.title = "Entries are locked upon submission. For corrections, contact your Circle Admin.";
+                } else {
+                    saveBtn.disabled = false;
+                    saveBtn.title = "";
+                }
+            }
 
             const tlSelect = document.getElementById('att-tl-name');
             if (data.daily_tl_id) {
@@ -330,3 +379,18 @@ async function handleAttendanceSubmit(e) {
         setButtonLoading('att-submit-btn', false, '<i class="fa-solid fa-lock me-1"></i> Save & Lock Attendance');
     }
 }
+
+async function toggleAttendanceLock(opId) {
+    try {
+        const res = await fetch(`/api/attendance/operation/${opId}/toggle-lock`, { method: 'PATCH' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || "Failed to toggle lock");
+        showToast(d.message || "Lock state updated", "success");
+        const opDate = document.getElementById('att-date').value;
+        const teamId = document.getElementById('att-team').value;
+        if (opDate && teamId) checkExistingDailyOperation(opDate, teamId);
+    } catch(err) {
+        showToast(err.message, "danger");
+    }
+}
+

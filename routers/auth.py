@@ -3,7 +3,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
-from auth import create_access_token
+from auth import create_access_token, get_current_actor
+from typing import Optional
 
 router = APIRouter()
 
@@ -25,7 +26,12 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
     
-    token = create_access_token(data={"sub": user.username, "role": user.role, "circle": user.circle or ""})
+    token = create_access_token(data={
+        "sub": user.username,
+        "role": user.role,
+        "circle": user.circle or "",
+        "team_id": user.team_id
+    })
     response.set_cookie(key="access_token", value=f"Bearer {token}", httponly=False)
 
     return {
@@ -34,7 +40,24 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         "username": user.username,
         "role": user.role,
         "circle": user.circle,
+        "team_id": user.team_id,
+        "team_name": user.team.name if user.team else None,
         "can_edit": user.can_edit
+    }
+
+@router.get("/me")
+def get_me(current_user: Optional[User] = Depends(get_current_actor)):
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "role": current_user.role,
+        "circle": current_user.circle,
+        "team_id": current_user.team_id,
+        "team_name": current_user.team.name if getattr(current_user, "team", None) else None,
+        "can_edit": current_user.can_edit,
+        "is_active": current_user.is_active
     }
 
 @router.post("/change-password")

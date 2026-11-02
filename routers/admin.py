@@ -4,11 +4,13 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from database import get_db
 from models import Team, TeamLead, Employee, User, VCRMaster
-from auth import get_current_user_optional
+from auth import get_current_user_optional, get_current_actor
+from models import get_assigned_circles, is_circle_authorized
 from schemas import (
     CreateTeamRequest, UpdateTeamRequest,
     CreateTeamLeadRequest, UpdateTeamLeadRequest, TeamLeadResponse,
@@ -35,13 +37,13 @@ def require_admin_role(
         )
     return True
 
-router = APIRouter(dependencies=[Depends(require_admin_role)])
+router = APIRouter()
 
 # ==========================================
 # 1. TEAMS / SQUADS MANAGEMENT
 # ==========================================
 @router.post("/teams")
-def create_team(req: CreateTeamRequest, db: Session = Depends(get_db)):
+def create_team(req: CreateTeamRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     existing = db.query(Team).filter(Team.name == req.name.strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Team '{req.name}' already exists")
@@ -87,13 +89,47 @@ def create_team(req: CreateTeamRequest, db: Session = Depends(get_db)):
 
 @router.get("/teams/all")
 @router.get("/teams")
-def list_teams(circle: Optional[str] = None, active_only: bool = False, db: Session = Depends(get_db)):
-    """Returns all teams (both active and inactive unless active_only=True specified)."""
+def list_teams(
+    circle: Optional[str] = None,
+    active_only: bool = False,
+    current_user: Optional[User] = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    """Returns teams filtered according to user role and squad permissions."""
     q = db.query(Team)
     if active_only:
         q = q.filter(Team.is_active == True)
-    if circle:
-        q = q.filter(Team.circle == circle.strip().upper())
+
+    if current_user and current_user.role == "USER":
+        # Strict Squad Isolation: field user only sees their own assigned team
+        if current_user.team_id:
+            q = q.filter(Team.id == current_user.team_id)
+        else:
+            q = q.filter(Team.id == -1)
+    elif current_user and current_user.role == "SUB_ADMIN":
+        allowed = get_assigned_circles(current_user)
+        expanded = list(allowed)
+        if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:
+            expanded.append("CITY")
+        if "CITY" in allowed and "BERHAMPUR CITY" not in expanded:
+            expanded.append("BERHAMPUR CITY")
+        if circle:
+            c_up = circle.strip().upper()
+            if not is_circle_authorized(current_user, c_up):
+                raise HTTPException(status_code=403, detail=f"Unauthorized for circle: {circle}")
+            if c_up in ("CITY", "BERHAMPUR CITY"):
+                q = q.filter(Team.circle.in_(["CITY", "BERHAMPUR CITY"]))
+            else:
+                q = q.filter(Team.circle == c_up)
+        else:
+            q = q.filter(Team.circle.in_(expanded))
+    elif circle:
+        c_clean = circle.strip().upper()
+        if c_clean in ("CITY", "BERHAMPUR CITY"):
+            q = q.filter(Team.circle.in_(["CITY", "BERHAMPUR CITY"]))
+        elif c_clean not in ("", "ALL", "ALL CIRCLES"):
+            q = q.filter(Team.circle == c_clean)
+
     teams = q.order_by(Team.circle, Team.name).all()
     return [
         {
@@ -113,7 +149,7 @@ def list_teams(circle: Optional[str] = None, active_only: bool = False, db: Sess
     ]
 
 @router.put("/teams/{team_id}")
-def update_team(team_id: int, req: UpdateTeamRequest, db: Session = Depends(get_db)):
+def update_team(team_id: int, req: UpdateTeamRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -158,7 +194,7 @@ def update_team(team_id: int, req: UpdateTeamRequest, db: Session = Depends(get_
     }
 
 @router.patch("/teams/{team_id}/toggle-status")
-def toggle_team_status(team_id: int, db: Session = Depends(get_db)):
+def toggle_team_status(team_id: int, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -178,7 +214,7 @@ def toggle_team_status(team_id: int, db: Session = Depends(get_db)):
 # 2. TPSODL TEAM LEADERS (REGULAR OFFICERS)
 # ==========================================
 @router.post("/team-leads")
-def create_team_lead(req: CreateTeamLeadRequest, db: Session = Depends(get_db)):
+def create_team_lead(req: CreateTeamLeadRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     existing = db.query(TeamLead).filter(TeamLead.tl_code == req.tl_code.strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Team Leader Code '{req.tl_code}' already exists")
@@ -208,6 +244,40 @@ def create_team_lead(req: CreateTeamLeadRequest, db: Session = Depends(get_db)):
         }
     }
 
+@router.get("/team-leads/lookup")
+def lookup_team_lead(code: str = Query(...), db: Session = Depends(get_db)):
+    """
+    Look up Team Leader by employee code (tl_code) or partial name.
+    """
+    c_str = code.strip()
+    if not c_str:
+        raise HTTPException(status_code=400, detail="Team leader code is required")
+    tl = db.query(TeamLead).filter(
+        or_(
+            func.lower(TeamLead.tl_code) == c_str.lower(),
+            func.lower(TeamLead.name) == c_str.lower()
+        )
+    ).first()
+    if not tl and len(c_str) >= 3:
+        tl = db.query(TeamLead).filter(
+            or_(
+                TeamLead.tl_code.ilike(f"%{c_str}%"),
+                TeamLead.name.ilike(f"%{c_str}%")
+            )
+        ).first()
+    if not tl:
+        raise HTTPException(status_code=404, detail=f"Team Leader / Officer with code '{code}' not found")
+    return {
+        "success": True,
+        "id": tl.id,
+        "tl_code": tl.tl_code,
+        "name": tl.name,
+        "designation": tl.designation or "",
+        "circle": tl.circle,
+        "contact_no": tl.contact_no or "",
+        "is_active": bool(tl.is_active)
+    }
+
 @router.get("/team-leads/all")
 @router.get("/team-leads")
 def list_team_leads(circle: Optional[str] = None, active_only: bool = False, db: Session = Depends(get_db)):
@@ -216,7 +286,11 @@ def list_team_leads(circle: Optional[str] = None, active_only: bool = False, db:
     if active_only:
         q = q.filter(TeamLead.is_active == True)
     if circle:
-        q = q.filter(TeamLead.circle == circle.strip().upper())
+        c_clean = circle.strip().upper()
+        if c_clean in ("CITY", "BERHAMPUR CITY"):
+            q = q.filter(or_(TeamLead.circle == "CITY", TeamLead.circle == "BERHAMPUR CITY"))
+        elif c_clean not in ("", "ALL", "ALL CIRCLES"):
+            q = q.filter(TeamLead.circle == c_clean)
     tls = q.order_by(TeamLead.circle, TeamLead.name).all()
     return [
         {
@@ -232,7 +306,7 @@ def list_team_leads(circle: Optional[str] = None, active_only: bool = False, db:
     ]
 
 @router.put("/team-leads/{tl_id}")
-def update_team_lead(tl_id: int, req: UpdateTeamLeadRequest, db: Session = Depends(get_db)):
+def update_team_lead(tl_id: int, req: UpdateTeamLeadRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     tl = db.query(TeamLead).filter(TeamLead.id == tl_id).first()
     if not tl:
         raise HTTPException(status_code=404, detail="Team Leader not found")
@@ -268,7 +342,7 @@ def update_team_lead(tl_id: int, req: UpdateTeamLeadRequest, db: Session = Depen
     }
 
 @router.patch("/team-leads/{tl_id}/toggle-status")
-def toggle_team_lead_status(tl_id: int, db: Session = Depends(get_db)):
+def toggle_team_lead_status(tl_id: int, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     tl = db.query(TeamLead).filter(TeamLead.id == tl_id).first()
     if not tl:
         raise HTTPException(status_code=404, detail="Team Leader not found")
@@ -288,7 +362,7 @@ def toggle_team_lead_status(tl_id: int, db: Session = Depends(get_db)):
 # 3. BA CONTRACTOR EMPLOYEES DIRECTORY
 # ==========================================
 @router.post("/employees")
-def create_employee(req: CreateEmployeeRequest, db: Session = Depends(get_db)):
+def create_employee(req: CreateEmployeeRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     existing = db.query(Employee).filter(Employee.emp_code == req.emp_code.strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Employee code '{req.emp_code}' already exists")
@@ -346,7 +420,7 @@ def list_employees(circle: Optional[str] = None, team_id: Optional[int] = None, 
     ]
 
 @router.put("/employees/{emp_id}")
-def update_employee(emp_id: int, req: UpdateEmployeeRequest, db: Session = Depends(get_db)):
+def update_employee(emp_id: int, req: UpdateEmployeeRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -383,7 +457,7 @@ def update_employee(emp_id: int, req: UpdateEmployeeRequest, db: Session = Depen
     }
 
 @router.patch("/employees/{emp_id}/toggle-status")
-def toggle_employee_status(emp_id: int, db: Session = Depends(get_db)):
+def toggle_employee_status(emp_id: int, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -403,14 +477,17 @@ def toggle_employee_status(emp_id: int, db: Session = Depends(get_db)):
 # 4. PORTAL USERS & RBAC MANAGEMENT
 # ==========================================
 @router.post("/users")
-def create_user(req: CreateUserRequest, db: Session = Depends(get_db)):
+def create_user(req: CreateUserRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == req.username.strip()).first():
         raise HTTPException(status_code=400, detail="Username already exists")
+    role_up = req.role.strip().upper()
+    team_id_val = req.team_id if role_up == "USER" and req.team_id and req.team_id > 0 else None
     user = User(
         username=req.username.strip(),
         password=req.password.strip(),
-        role=req.role.strip().upper(),
+        role=role_up,
         circle=req.circle.strip().upper() if req.circle and req.circle.strip() else None,
+        team_id=team_id_val,
         can_edit=req.can_edit,
         is_active=True
     )
@@ -426,6 +503,8 @@ def create_user(req: CreateUserRequest, db: Session = Depends(get_db)):
             "username": user.username,
             "role": user.role,
             "circle": user.circle or "ALL",
+            "team_id": user.team_id,
+            "team_name": user.team.name if user.team else None,
             "can_edit": user.can_edit,
             "is_active": user.is_active
         }
@@ -433,7 +512,7 @@ def create_user(req: CreateUserRequest, db: Session = Depends(get_db)):
 
 @router.get("/users/all")
 @router.get("/users")
-def list_users(db: Session = Depends(get_db)):
+def list_users(_admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     """Returns all portal accounts excluding sensitive passwords."""
     users = db.query(User).order_by(User.role, User.username).all()
     return [
@@ -442,6 +521,8 @@ def list_users(db: Session = Depends(get_db)):
             "username": u.username,
             "role": u.role,
             "circle": u.circle or "ALL",
+            "team_id": u.team_id,
+            "team_name": u.team.name if u.team else None,
             "can_edit": bool(u.can_edit),
             "is_active": bool(u.is_active)
         }
@@ -449,7 +530,7 @@ def list_users(db: Session = Depends(get_db)):
     ]
 
 @router.put("/users/{user_id}")
-def update_user(user_id: int, req: UpdateUserRequest, db: Session = Depends(get_db)):
+def update_user(user_id: int, req: UpdateUserRequest, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -460,6 +541,8 @@ def update_user(user_id: int, req: UpdateUserRequest, db: Session = Depends(get_
     if req.circle is not None:
         c_val = req.circle.strip().upper()
         user.circle = c_val if c_val and c_val != "ALL" else None
+    if req.team_id is not None:
+        user.team_id = req.team_id if req.team_id > 0 else None
     if req.can_edit is not None:
         user.can_edit = req.can_edit
     if req.is_active is not None:
@@ -474,13 +557,15 @@ def update_user(user_id: int, req: UpdateUserRequest, db: Session = Depends(get_
             "username": user.username,
             "role": user.role,
             "circle": user.circle or "ALL",
+            "team_id": user.team_id,
+            "team_name": user.team.name if user.team else None,
             "can_edit": bool(user.can_edit),
             "is_active": bool(user.is_active)
         }
     }
 
 @router.patch("/users/{user_id}/toggle-status")
-def toggle_user_status(user_id: int, db: Session = Depends(get_db)):
+def toggle_user_status(user_id: int, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -500,7 +585,7 @@ def toggle_user_status(user_id: int, db: Session = Depends(get_db)):
 # 5. VCR MASTERS & FORWARDERS
 # ==========================================
 @router.post("/vcr")
-def create_vcr(req: VCRMasterCreate, db: Session = Depends(get_db)):
+def create_vcr(req: VCRMasterCreate, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     existing = db.query(VCRMaster).filter(VCRMaster.vcr_number == req.vcr_number.strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail="VCR Number already exists")
@@ -511,8 +596,9 @@ def create_vcr(req: VCRMasterCreate, db: Session = Depends(get_db)):
         consumer_address=req.consumer_address.strip() if req.consumer_address else None,
         circle=req.circle.strip().upper(),
         division=req.division.strip() if req.division else None,
+        subdivision=req.subdivision.strip() if req.subdivision else None,
         section=req.section.strip() if req.section else None,
-        provisional_bill_date=req.provisional_bill_date
+        inspection_date=req.inspection_date or req.provisional_bill_date or req.date_of_provisional
     )
     db.add(vcr)
     db.commit()

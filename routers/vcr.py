@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from database import get_db
-from models import VCRMaster, User, get_assigned_circles, is_circle_authorized
+from models import VCRMaster, User, DisconnectionRecord, LoadBooking, Team, get_assigned_circles, is_circle_authorized
 from auth import get_current_actor, verify_write_permission
+from sqlalchemy import func
 
 router = APIRouter()
 
@@ -26,7 +27,7 @@ def download_vcr_template():
         "Circle",
         "Division",
         "Section",
-        "Provisional Bill Date"
+        "Inspection Date"
     ]
     ws.append(headers)
 
@@ -67,6 +68,7 @@ def download_vcr_template():
     )
 
 @router.post("/bulk-upload")
+@router.post("/upload")
 async def bulk_upload_vcr_excel(
     file: UploadFile = File(...),
     current_user: Optional[User] = Depends(get_current_actor),
@@ -76,8 +78,12 @@ async def bulk_upload_vcr_excel(
     Ingests VCR master records in bulk from an uploaded Excel (.xlsx/.xlsm) spreadsheet.
     Enforces strict deduplication and circle scoping for Sub-Admin.
     """
-    if current_user:
-        verify_write_permission(current_user)
+    if not current_user or current_user.role not in ["ADMIN", "SUB_ADMIN"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Access Denied: Only Circle Sub-Admins and System Admins are authorized to upload VCR or Collection data."
+        )
+    verify_write_permission(current_user)
 
     if not file.filename.lower().endswith(('.xlsx', '.xlsm')):
         raise HTTPException(status_code=400, detail="Only Excel (.xlsx / .xlsm) files are supported")
@@ -117,8 +123,8 @@ async def bulk_upload_vcr_excel(
             col_map["division"] = idx
         elif "section" in h or "sec" in h:
             col_map["section"] = idx
-        elif "date" in h or "bill" in h:
-            col_map["provisional_bill_date"] = idx
+        elif "inspection" in h or "insspection" in h or "provisional" in h or "date" in h or "bill" in h:
+            col_map["inspection_date"] = idx
 
     def get_val(r, key, default_idx):
         idx = col_map.get(key, default_idx)
@@ -192,8 +198,8 @@ async def bulk_upload_vcr_excel(
         sec_raw = get_val(row, "section", 5)
         sec = str(sec_raw).strip() if sec_raw else None
 
-        # Bill Date
-        b_date_raw = get_val(row, "provisional_bill_date", 6)
+        # Inspection Date
+        b_date_raw = get_val(row, "inspection_date", 6)
         b_date = None
         if isinstance(b_date_raw, datetime):
             b_date = b_date_raw.date()
@@ -213,7 +219,7 @@ async def bulk_upload_vcr_excel(
             division=div,
             subdivision=subdiv,
             section=sec,
-            provisional_bill_date=b_date
+            inspection_date=b_date
         )
 
         inserted_records.append(new_vcr)
@@ -231,3 +237,49 @@ async def bulk_upload_vcr_excel(
         "skipped_duplicates": skipped_duplicates,
         "errors": errors[:50]
     }
+
+
+@router.get("/check-exists")
+def check_vcr_exists(
+    vcr_number: str = Query(...),
+    form_type: str = Query("dc"),
+    db: Session = Depends(get_db)
+):
+    """
+    Checks if a VCR number has already been entered in Disconnection or Load Booking records.
+    Returns: {exists: bool, vcr_number: str, booked_date: str|None, team_name: str|None, details: str|None}
+    """
+    v_num = vcr_number.strip()
+    if not v_num:
+        return {"exists": False, "vcr_number": "", "booked_date": None, "team_name": None, "details": None}
+
+    if form_type.lower() == "lb":
+        rec = db.query(LoadBooking).filter(
+            func.lower(LoadBooking.vcr_number) == v_num.lower()
+        ).order_by(LoadBooking.id.desc()).first()
+        if rec:
+            tm_name = rec.team.name if rec.team else "Unassigned"
+            d_str = str(rec.booking_date) if rec.booking_date else "N/A"
+            return {
+                "exists": True,
+                "vcr_number": v_num,
+                "booked_date": d_str,
+                "team_name": tm_name,
+                "details": f"VCR Number '{v_num}' was already booked on {d_str} by squad '{tm_name}' (Book: {rec.book_number or 'N/A'}, Page: {rec.page_no or 'N/A'})."
+            }
+    else:
+        rec = db.query(DisconnectionRecord).filter(
+            func.lower(DisconnectionRecord.vcr_number) == v_num.lower()
+        ).order_by(DisconnectionRecord.id.desc()).first()
+        if rec:
+            tm_name = rec.team.name if rec.team else "Unassigned"
+            d_str = str(rec.dc_date) if rec.dc_date else "N/A"
+            return {
+                "exists": True,
+                "vcr_number": v_num,
+                "booked_date": d_str,
+                "team_name": tm_name,
+                "details": f"VCR Number '{v_num}' has already been disconnected on {d_str} by squad '{tm_name}'."
+            }
+
+    return {"exists": False, "vcr_number": v_num, "booked_date": None, "team_name": None, "details": None}

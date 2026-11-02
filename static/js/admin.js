@@ -37,6 +37,7 @@ async function loadAllTeams() {
 
         renderTeamsTable(globalTeamsCache);
         populateTeamDropdowns(globalTeamsCache);
+        populateUserSquadOptions();
     } catch(err) {
         if (tbody) {
             tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${err.message}</td></tr>`;
@@ -751,11 +752,15 @@ function renderUsersTable(users) {
             ? `<button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="toggleUserStatus(${u.id})" title="Block / Deactivate Login">Deactivate</button>`
             : `<button type="button" class="btn btn-outline-success btn-sm py-0 px-2" onclick="toggleUserStatus(${u.id})" title="Restore Login Access">Activate</button>`;
 
+        const squadOrCircle = (u.role === 'USER')
+            ? (u.team_name ? `<span class="badge bg-primary-subtle text-primary border border-primary-subtle"><i class="fa-solid fa-users me-1"></i> ${u.team_name}</span>` : '<span class="badge bg-warning-subtle text-dark border">No Squad Assigned</span>')
+            : `<span class="badge bg-light text-dark border">${u.circle || 'ALL'}</span>`;
+
         return `
             <tr id="userRow_${u.id}">
                 <td class="fw-bold text-dark"><i class="fa-solid fa-user-circle text-secondary me-1"></i> ${u.username}</td>
                 <td>${roleBadge}</td>
-                <td><span class="badge bg-light text-dark border">${u.circle || 'ALL'}</span></td>
+                <td>${squadOrCircle}</td>
                 <td>${canEditBadge}</td>
                 <td id="userStatusCell_${u.id}">${statusBadge}</td>
                 <td class="text-end">
@@ -771,29 +776,55 @@ function renderUsersTable(users) {
     }).join('');
 }
 
+function populateUserSquadOptions() {
+    const usrTeamEl = document.getElementById('usrTeamId');
+    const editTeamEl = document.getElementById('editUserTeamId');
+    const teams = globalTeamsCache || [];
+    let html = '<option value="">-- Select Assigned Squad --</option>';
+    teams.forEach(t => {
+        html += `<option value="${t.id}">${t.name} (${t.circle})</option>`;
+    });
+    if (usrTeamEl) usrTeamEl.innerHTML = html;
+    if (editTeamEl) editTeamEl.innerHTML = html;
+}
+
 function handleUserRoleChange(role) {
     const circGroup = document.getElementById('usrCircleGroup');
     const editGroup = document.getElementById('usrCanEditGroup');
+    const teamGroup = document.getElementById('usrTeamGroup');
 
     if (role === 'ADMIN') {
         if (circGroup) circGroup.style.display = 'none';
         if (editGroup) editGroup.style.display = 'none';
+        if (teamGroup) teamGroup.style.display = 'none';
+    } else if (role === 'USER') {
+        if (circGroup) circGroup.style.display = 'none';
+        if (editGroup) editGroup.style.display = 'none';
+        if (teamGroup) teamGroup.style.display = 'block';
     } else {
         if (circGroup) circGroup.style.display = 'block';
         if (editGroup) editGroup.style.display = 'block';
+        if (teamGroup) teamGroup.style.display = 'none';
     }
 }
 
 function handleEditUserRoleChange(role) {
     const circGroup = document.getElementById('editUserCircleGroup');
     const editGroup = document.getElementById('editUserCanEditGroup');
+    const teamGroup = document.getElementById('editUserTeamGroup');
 
     if (role === 'ADMIN') {
         if (circGroup) circGroup.style.display = 'none';
         if (editGroup) editGroup.style.display = 'none';
+        if (teamGroup) teamGroup.style.display = 'none';
+    } else if (role === 'USER') {
+        if (circGroup) circGroup.style.display = 'none';
+        if (editGroup) editGroup.style.display = 'none';
+        if (teamGroup) teamGroup.style.display = 'block';
     } else {
         if (circGroup) circGroup.style.display = 'block';
         if (editGroup) editGroup.style.display = 'block';
+        if (teamGroup) teamGroup.style.display = 'none';
     }
 }
 
@@ -803,9 +834,16 @@ async function createUser(e) {
 
     const role = document.getElementById('usrRole').value;
     const selectedCircles = Array.from(document.querySelectorAll('.usr-circle-check:checked')).map(cb => cb.value);
+    const teamIdVal = document.getElementById('usrTeamId') ? document.getElementById('usrTeamId').value : '';
 
-    if (role !== 'ADMIN' && selectedCircles.length === 0) {
-        showToast("Please select at least one assigned circle for this account", "warning");
+    if (role === 'USER') {
+        if (!teamIdVal) {
+            showToast("Please select an assigned squad for this field user account", "warning");
+            setButtonLoading('btnCreateUser', false, '<i class="fa-solid fa-user-plus me-1"></i> Create Account');
+            return;
+        }
+    } else if (role === 'SUB_ADMIN' && selectedCircles.length === 0) {
+        showToast("Please select at least one assigned circle for this Sub-Admin account", "warning");
         setButtonLoading('btnCreateUser', false, '<i class="fa-solid fa-user-plus me-1"></i> Create Account');
         return;
     }
@@ -814,8 +852,9 @@ async function createUser(e) {
         username: document.getElementById('usrName').value.trim(),
         password: document.getElementById('usrPass').value.trim(),
         role: role,
-        circle: (role === 'ADMIN') ? null : (selectedCircles.length ? selectedCircles.join(',') : null),
-        can_edit: document.getElementById('usrCanEdit') ? document.getElementById('usrCanEdit').checked : false
+        circle: (role === 'SUB_ADMIN') ? (selectedCircles.length ? selectedCircles.join(',') : null) : null,
+        team_id: (role === 'USER' && teamIdVal) ? parseInt(teamIdVal) : null,
+        can_edit: (role === 'SUB_ADMIN' && document.getElementById('usrCanEdit')) ? document.getElementById('usrCanEdit').checked : false
     };
 
     try {
@@ -866,6 +905,9 @@ function openEditUserModal(userId) {
                      (val === 'CITY' && assigned.includes('BERHAMPUR CITY'));
     });
 
+    const teamEl = document.getElementById('editUserTeamId');
+    if (teamEl) teamEl.value = user.team_id || '';
+
     handleEditUserRoleChange(user.role);
 
     const modalEl = document.getElementById('editUserModal');
@@ -883,17 +925,25 @@ async function submitEditUser(e) {
     const role = document.getElementById('editUserRole').value;
     const newPass = document.getElementById('editUserNewPass') ? document.getElementById('editUserNewPass').value.trim() : '';
     const selectedCircles = Array.from(document.querySelectorAll('.edit-usr-circle-check:checked')).map(cb => cb.value);
+    const teamIdVal = document.getElementById('editUserTeamId') ? document.getElementById('editUserTeamId').value : '';
 
-    if (role !== 'ADMIN' && selectedCircles.length === 0) {
-        showToast("Please select at least one assigned circle for this account", "warning");
+    if (role === 'USER') {
+        if (!teamIdVal) {
+            showToast("Please select an assigned squad for this user account", "warning");
+            setButtonLoading('btnSaveEditUser', false, 'Save Changes');
+            return;
+        }
+    } else if (role === 'SUB_ADMIN' && selectedCircles.length === 0) {
+        showToast("Please select at least one assigned circle for this Sub-Admin account", "warning");
         setButtonLoading('btnSaveEditUser', false, 'Save Changes');
         return;
     }
 
     const payload = {
         role: role,
-        circle: (role === 'ADMIN') ? null : (selectedCircles.length ? selectedCircles.join(',') : null),
-        can_edit: document.getElementById('editUserCanEdit') ? document.getElementById('editUserCanEdit').checked : false,
+        circle: (role === 'SUB_ADMIN') ? (selectedCircles.length ? selectedCircles.join(',') : null) : null,
+        team_id: (role === 'USER' && teamIdVal) ? parseInt(teamIdVal) : null,
+        can_edit: (role === 'SUB_ADMIN' && document.getElementById('editUserCanEdit')) ? document.getElementById('editUserCanEdit').checked : false,
         is_active: document.getElementById('editUserIsActive') ? document.getElementById('editUserIsActive').checked : true
     };
     if (newPass) {

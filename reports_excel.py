@@ -56,6 +56,36 @@ def apply_sheet_protection(ws):
     ws.protection.selectUnlockedCells = True
 
 
+def _att_status(attendance_map: dict, emp: dict, year: int, month: int, d: int) -> str:
+    """Looks up a day's status; accepts (emp_id, 'YYYY-MM-DD') or {emp_code: {day: status}} maps."""
+    date_key = f"{year}-{str(month).zfill(2)}-{str(d).zfill(2)}"
+    status = attendance_map.get((emp.get("id"), date_key))
+    if status is None:
+        by_code = attendance_map.get(emp.get("emp_code"))
+        if isinstance(by_code, dict):
+            status = by_code.get(d)
+    return status or "-"
+
+
+def _g(r, *keys, default=None):
+    """Read the first non-empty value from a dict or ORM object across alternate key names."""
+    for k in keys:
+        v = r.get(k) if isinstance(r, dict) else getattr(r, k, None)
+        if v not in (None, ""):
+            return v
+    return default
+
+
+def _fmt_date(v) -> str:
+    if hasattr(v, "strftime"):
+        return v.strftime("%d-%m-%Y")
+    s = str(v or "-")
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+    except ValueError:
+        return s
+
+
 # =========================================================================
 # 1. FORM D ATTENDANCE (EXCEL)
 # =========================================================================
@@ -191,10 +221,25 @@ def build_form_d_excel(
             if not cell.fill.start_color.rgb:
                 cell.fill = header_fill
 
-    # Rows 7+: Employee Attendance Rows
+    # Rows 7+: Employee Attendance Rows, grouped team-wise (team header row before each team)
     current_row = 7
+    current_team = object()
+    show_team_rows = not team_name   # single-team report already names the team in the header
     for idx, emp in enumerate(employees, start=1):
-        emp_id = emp.get("id")
+        emp_team = emp.get("team_name") or "UNASSIGNED"
+        if show_team_rows and emp_team != current_team:
+            current_team = emp_team
+            ws.merge_cells(f"A{current_row}:{last_col_letter}{current_row}")
+            th_cell = ws.cell(row=current_row, column=1, value=f"TEAM: {emp_team.upper()}")
+            th_cell.font = font_cell_bold
+            th_cell.alignment = align_left
+            for col_idx in range(1, total_cols + 1):
+                c = ws.cell(row=current_row, column=col_idx)
+                c.fill = header_fill
+                c.border = grid_border
+            ws.row_dimensions[current_row].height = 18
+            current_row += 1
+
         ws.cell(row=current_row, column=1, value=idx).alignment = align_center
         ws.cell(row=current_row, column=2, value=emp.get("designation") or "-").alignment = align_left
         ws.cell(row=current_row, column=3, value=emp.get("name") or "").alignment = align_left
@@ -207,9 +252,8 @@ def build_form_d_excel(
 
         for d in range(1, num_days + 1):
             col_idx = 3 + d
-            date_key = f"{year}-{str(month).zfill(2)}-{str(d).zfill(2)}"
-            status = attendance_map.get((emp_id, date_key), "-")
-            
+            status = _att_status(attendance_map, emp, year, month, d)
+
             c = ws.cell(row=current_row, column=col_idx, value=status if status != "-" else "")
             c.alignment = align_center
             if status == "P":
@@ -667,7 +711,129 @@ def build_team_log_excel(team_name: str, circle: str, team_lead: str, year: int,
 
 
 # =========================================================================
-# 4. TEAM PERFORMANCE REPORT (EXCEL)
+# SHARED HELPERS FOR SIMPLE REGISTER SHEETS (performance / MR / load booking)
+# =========================================================================
+_F_COMP = Font(name="Calibri", size=13, bold=True)
+_F_ADDR = Font(name="Calibri", size=9, color="333333")
+_F_TITLE = Font(name="Calibri", size=11, bold=True)
+_F_META = Font(name="Calibri", size=9, bold=True, color="1E293B")
+_F_TH = Font(name="Calibri", size=9, bold=True, color="000000")
+_F_CELL = Font(name="Calibri", size=9)
+_F_BOLD = Font(name="Calibri", size=9, bold=True)
+_SIDE = Side(style='thin', color='444444')
+_GRID = Border(left=_SIDE, right=_SIDE, top=_SIDE, bottom=_SIDE)
+_TOTAL_BORDER = Border(left=_SIDE, right=_SIDE, top=Side(style='medium', color='000000'),
+                       bottom=Side(style='double', color='000000'))
+_HEADER_FILL = PatternFill(start_color="D0D0D0", end_color="D0D0D0", fill_type="solid")
+_TOTAL_FILL = PatternFill(start_color="E2E2E2", end_color="E2E2E2", fill_type="solid")
+_ZEBRA_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+_META_FILL = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+_LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
+_RIGHT = Alignment(horizontal="right", vertical="center")
+
+
+def _write_register(ws, circle_for_agency, title_lines, meta, headers, widths, rows, aligns,
+                    num_formats, sum_cols, total_label, sig_lines):
+    """
+    Writes header block, column headers (one row), data rows, a TOTAL row with =SUM() on
+    `sum_cols` (1-based), and a signature block. `rows` is a list of value lists.
+    """
+    agency = get_agency_header(circle_for_agency)
+    n = len(headers)
+    last = get_column_letter(n)
+
+    lines = [(agency["name"], _F_COMP, None), (agency["address"], _F_ADDR, None)]
+    lines += [(tl, _F_TITLE, None) for tl in title_lines]
+    lines.append((meta, _F_META, _META_FILL))
+    r = 1
+    for text, font, fill in lines:
+        ws.merge_cells(f"A{r}:{last}{r}")
+        c = ws[f"A{r}"]
+        c.value = text
+        c.font = font
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        if fill:
+            c.fill = fill
+        r += 1
+
+    hdr_row = r
+    for i, h in enumerate(headers, 1):
+        c = ws.cell(row=hdr_row, column=i, value=h)
+        c.font = _F_TH
+        c.alignment = _CENTER
+        c.fill = _HEADER_FILL
+        c.border = _GRID
+    ws.row_dimensions[hdr_row].height = 30
+
+    start = hdr_row + 1
+    cur = start
+    for idx, vals in enumerate(rows, 1):
+        for i, v in enumerate(vals, 1):
+            c = ws.cell(row=cur, column=i, value=v)
+            c.alignment = {"c": _CENTER, "l": _LEFT, "r": _RIGHT}[aligns[i - 1]]
+            c.font = _F_BOLD if i in sum_cols else _F_CELL
+            c.border = _GRID
+            if num_formats[i - 1]:
+                c.number_format = num_formats[i - 1]
+            if idx % 2 == 0:
+                c.fill = _ZEBRA_FILL
+        cur += 1
+
+    if not rows:
+        ws.merge_cells(f"A{cur}:{last}{cur}")
+        ws[f"A{cur}"] = "No records found for this period."
+        ws[f"A{cur}"].alignment = _CENTER
+        ws[f"A{cur}"].font = _F_CELL
+        for i in range(1, n + 1):
+            ws.cell(row=cur, column=i).border = _GRID
+        cur += 1
+
+    total_row = cur
+    first_sum = min(sum_cols)
+    ws.merge_cells(f"A{total_row}:{get_column_letter(first_sum - 1)}{total_row}")
+    ws[f"A{total_row}"] = total_label
+    for i in range(1, n + 1):
+        c = ws.cell(row=total_row, column=i)
+        c.fill = _TOTAL_FILL
+        c.border = _TOTAL_BORDER
+        c.font = _F_BOLD
+    ws[f"A{total_row}"].alignment = _RIGHT
+    for col in sum_cols:
+        let = get_column_letter(col)
+        c = ws.cell(row=total_row, column=col)
+        c.value = f"=SUM({let}{start}:{let}{total_row - 1})" if rows else 0
+        c.alignment = _CENTER if aligns[col - 1] == "c" else _RIGHT
+        if num_formats[col - 1]:
+            c.number_format = num_formats[col - 1]
+
+    sig_row = total_row + 3
+    sig_col = get_column_letter(max(1, n - 2))
+    for i, text in enumerate(sig_lines):
+        ws.merge_cells(f"{sig_col}{sig_row + i}:{last}{sig_row + i}")
+        c = ws[f"{sig_col}{sig_row + i}"]
+        c.value = text
+        c.font = _F_BOLD if i == 0 else _F_CELL
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = ws.cell(row=hdr_row + 1, column=1)
+
+
+def _ee_sig(circle_up: str):
+    return ["Executive Engineer (Elect.)", "Enforcement & Vigilance Cell", f"TPSODL, {circle_up} Circle"]
+
+
+def _save(wb, ws) -> bytes:
+    apply_sheet_protection(ws)   # read-only & tamper-proof
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# =========================================================================
+# 4. TEAM PERFORMANCE REPORT (EXCEL) - one row per team for the month, no date
 # =========================================================================
 def build_team_performance_excel(circle_name: str, year: int, month: int, performance_rows: List[dict]) -> bytes:
     wb = openpyxl.Workbook()
@@ -675,548 +841,133 @@ def build_team_performance_excel(circle_name: str, year: int, month: int, perfor
     month_name = calendar.month_name[month].upper()
     circle_up = circle_name.upper()
     ws.title = f"Performance - {calendar.month_abbr[month]} {year}"
-    ws.views.sheetView[0].showGridLines = True
 
-    agency = get_agency_header(circle_name)
-    total_cols = 8
-    last_col_let = get_column_letter(total_cols)
+    rows = []
+    for idx, r in enumerate(performance_rows or [], 1):
+        rows.append([
+            idx,
+            _g(r, "team_name", default="-"),
+            _g(r, "assigned_team_lead", "team_lead", default="-"),
+            _g(r, "supervisor_name", "supervisor", default="-"),
+            float(_g(r, "load_booked_kw", "load_booked", default=0.0)),
+            float(_g(r, "amount_collected", default=0.0)),
+            int(_g(r, "dc_count", "number_of_dc", default=0)),
+            int(_g(r, "km_run", "total_km", default=0)),
+            int(_g(r, "emp_present_count", default=0)),
+        ])
 
-    font_comp = Font(name="Calibri", size=13, bold=True)
-    font_addr = Font(name="Calibri", size=9, bold=False, color="333333")
-    font_title = Font(name="Calibri", size=11, bold=True)
-    font_meta = Font(name="Calibri", size=9, bold=True, color="1E293B")
-    font_th = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_cell = Font(name="Calibri", size=9)
-    font_cell_bold = Font(name="Calibri", size=9, bold=True)
-
-    thin_border = Border(left=Side(style='thin', color='444444'), right=Side(style='thin', color='444444'),
-                         top=Side(style='thin', color='444444'), bottom=Side(style='thin', color='444444'))
-    header_fill = PatternFill(start_color="D0D0D0", end_color="D0D0D0", fill_type="solid")
-    total_fill = PatternFill(start_color="E2E2E2", end_color="E2E2E2", fill_type="solid")
-    zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-
-    align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
-    align_right = Alignment(horizontal="right", vertical="center")
-
-    ws.merge_cells(f"A1:{last_col_let}1")
-    ws["A1"] = agency["name"]
-    ws["A1"].font = font_comp
-    ws["A1"].alignment = align_center
-
-    ws.merge_cells(f"A2:{last_col_let}2")
-    ws["A2"] = agency["address"]
-    ws["A2"].font = font_addr
-    ws["A2"].alignment = align_center
-
-    ws.merge_cells(f"A3:{last_col_let}3")
-    ws["A3"] = f"TEAM-WISE OPERATIONAL PERFORMANCE REPORT - {month_name} {year}"
-    ws["A3"].font = font_title
-    ws["A3"].alignment = align_center
-
-    ws.merge_cells(f"A4:{last_col_let}4")
-    ws["A4"] = f"Enforcement & Vigilance Cell | Circle: {circle_up}"
-    ws["A4"].font = font_meta
-    ws["A4"].alignment = align_center
-    ws["A4"].fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-
-    headers = [
-        "Date", "Team Name", "Mode of Team Operation",
-        "Load Booked (KW)", "Amount Coll. (Rs.)", "No. of DC",
-        "KM Run (Day)", "Emp Present"
-    ]
-    for col_idx, h_text in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=col_idx, value=h_text)
-        cell.font = font_th
-        cell.alignment = align_center
-        cell.fill = header_fill
-        cell.border = thin_border
-
-    current_row = 6
-    for idx, r in enumerate(performance_rows, 1):
-        raw_d = r.get('date', '')
-        if hasattr(raw_d, "strftime"):
-            d_str = raw_d.strftime("%d-%m-%Y")
-        else:
-            d_str = str(raw_d)
-            try:
-                d_str = datetime.strptime(d_str[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
-            except Exception:
-                pass
-
-        mode = r.get('operation_mode') or 'Operated Independently'
-        if mode == "Merged" and r.get('merged_with_team'):
-            mode = f"Merged with {r.get('merged_with_team')}"
-        elif not r.get('team_leader_present', True):
-            mode += " (TL Absent)"
-
-        ws.cell(row=current_row, column=1, value=d_str).alignment = align_center
-        ws.cell(row=current_row, column=2, value=r.get('team_name', '')).alignment = align_left
-        ws.cell(row=current_row, column=3, value=mode).alignment = align_left
-
-        c_load = ws.cell(row=current_row, column=4, value=float(r.get('load_booked', 0.0) or 0.0))
-        c_load.alignment = align_center
-        c_load.number_format = "0.00"
-
-        c_amt = ws.cell(row=current_row, column=5, value=float(r.get('amount_collected', 0.0) or 0.0))
-        c_amt.alignment = align_right
-        c_amt.number_format = "#,##0.00"
-
-        c_dc = ws.cell(row=current_row, column=6, value=int(r.get('number_of_dc', 0) or 0))
-        c_dc.alignment = align_center
-        c_dc.number_format = "#,##0"
-
-        c_km = ws.cell(row=current_row, column=7, value=int(r.get('total_km', 0) or 0))
-        c_km.alignment = align_center
-        c_km.number_format = "#,##0"
-
-        c_emp = ws.cell(row=current_row, column=8, value=int(r.get('emp_present_count', 0) or 0))
-        c_emp.alignment = align_center
-        c_emp.font = font_cell_bold
-
-        for col_idx in range(1, total_cols + 1):
-            c = ws.cell(row=current_row, column=col_idx)
-            c.border = thin_border
-            if not c.font.bold:
-                c.font = font_cell
-            if idx % 2 == 0:
-                c.fill = zebra_fill
-        current_row += 1
-
-    total_row = current_row
-    ws.merge_cells(f"A{total_row}:C{total_row}")
-    t_label = ws[f"A{total_row}"]
-    t_label.value = "TOTAL"
-    t_label.font = font_cell_bold
-    t_label.alignment = align_right
-
-    data_start = 6
-    data_end = total_row - 1 if performance_rows else 6
-
-    ws.cell(row=total_row, column=4, value=f"=SUM(D{data_start}:D{data_end})" if performance_rows else 0).number_format = "0.00"
-    ws.cell(row=total_row, column=5, value=f"=SUM(E{data_start}:E{data_end})" if performance_rows else 0).number_format = "#,##0.00"
-    ws.cell(row=total_row, column=6, value=f"=SUM(F{data_start}:F{data_end})" if performance_rows else 0).number_format = "#,##0"
-    ws.cell(row=total_row, column=7, value=f"=SUM(G{data_start}:G{data_end})" if performance_rows else 0).number_format = "#,##0"
-    ws.cell(row=total_row, column=8, value="-").alignment = align_center
-
-    for c_i in [4, 5, 6, 7]:
-        ws.cell(row=total_row, column=c_i).alignment = align_center if c_i != 5 else align_right
-        ws.cell(row=total_row, column=c_i).font = font_cell_bold
-
-    for col_idx in range(1, total_cols + 1):
-        c = ws.cell(row=total_row, column=col_idx)
-        c.fill = total_fill
-        c.border = Border(left=Side(style='thin', color='444444'), right=Side(style='thin', color='444444'),
-                          top=Side(style='medium', color='000000'), bottom=Side(style='double', color='000000'))
-
-    # Signature
-    sig_row = total_row + 3
-    sig_col = get_column_letter(total_cols - 2)
-    ws.merge_cells(f"{sig_col}{sig_row}:{last_col_let}{sig_row}")
-    ws[f"{sig_col}{sig_row}"] = "Executive Engineer (Elect.)"
-    ws[f"{sig_col}{sig_row}"].font = font_cell_bold
-    ws[f"{sig_col}{sig_row}"].alignment = align_center
-
-    ws.merge_cells(f"{sig_col}{sig_row+1}:{last_col_let}{sig_row+1}")
-    ws[f"{sig_col}{sig_row+1}"] = "Enforcement & Vigilance Cell"
-    ws[f"{sig_col}{sig_row+1}"].font = font_cell
-    ws[f"{sig_col}{sig_row+1}"].alignment = align_center
-
-    ws.merge_cells(f"{sig_col}{sig_row+2}:{last_col_let}{sig_row+2}")
-    ws[f"{sig_col}{sig_row+2}"] = f"TPSODL, {circle_up} Circle"
-    ws[f"{sig_col}{sig_row+2}"].font = font_cell
-    ws[f"{sig_col}{sig_row+2}"].alignment = align_center
-
-    ws.column_dimensions["A"].width = 13
-    ws.column_dimensions["B"].width = 20
-    ws.column_dimensions["C"].width = 28
-    ws.column_dimensions["D"].width = 17
-    ws.column_dimensions["E"].width = 19
-    ws.column_dimensions["F"].width = 13
-    ws.column_dimensions["G"].width = 14
-    ws.column_dimensions["H"].width = 14
-
-    # SPREADSHEET PROTECTION: Read-only & Tamper-proof
-    apply_sheet_protection(ws)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+    _write_register(
+        ws, circle_name,
+        title_lines=[f"TEAM-WISE OPERATIONAL PERFORMANCE REPORT - {month_name} {year}"],
+        meta=f"Enforcement & Vigilance Cell | Circle: {circle_up}",
+        headers=["Sl No.", "Team Name", "Team Leader", "Supervisor", "Load Booked (KW)",
+                 "Amount Coll. (Rs.)", "No. of DC", "KM Run", "Emp Present (Man-days)"],
+        widths=[7, 22, 22, 22, 15, 17, 11, 11, 15],
+        rows=rows,
+        aligns=["c", "l", "l", "l", "c", "r", "c", "c", "c"],
+        num_formats=[None, None, None, None, "#,##0.00", "#,##0.00", "#,##0", "#,##0", "#,##0"],
+        sum_cols=[5, 6, 7, 8, 9],
+        total_label="TOTAL",
+        sig_lines=_ee_sig(circle_up),
+    )
+    return _save(wb, ws)
 
 
 # =========================================================================
-# 5. FIELD COLLECTION REGISTER (EXCEL)
+# 5. MR COLLECTION REGISTER (EXCEL) - every MR entry of the month
 # =========================================================================
 def build_collection_excel(circle_name: str, year: int, month: int, records: list) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     month_name = calendar.month_name[month].upper()
     circle_up = circle_name.upper()
-    ws.title = f"Collections - {calendar.month_abbr[month]} {year}"
-    ws.views.sheetView[0].showGridLines = True
+    ws.title = f"MR Collection - {calendar.month_abbr[month]} {year}"
 
-    agency = get_agency_header(circle_name)
-    total_cols = 10
-    last_col_let = get_column_letter(total_cols)
-
-    font_comp = Font(name="Calibri", size=13, bold=True)
-    font_addr = Font(name="Calibri", size=9, bold=False, color="333333")
-    font_title = Font(name="Calibri", size=11, bold=True)
-    font_meta = Font(name="Calibri", size=9, bold=True, color="1E293B")
-    font_th = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_cell = Font(name="Calibri", size=9)
-    font_cell_bold = Font(name="Calibri", size=9, bold=True)
-
-    thin_border = Border(left=Side(style='thin', color='444444'), right=Side(style='thin', color='444444'),
-                         top=Side(style='thin', color='444444'), bottom=Side(style='thin', color='444444'))
-    header_fill = PatternFill(start_color="D0D0D0", end_color="D0D0D0", fill_type="solid")
-    total_fill = PatternFill(start_color="E2E2E2", end_color="E2E2E2", fill_type="solid")
-    zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-
-    align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
-    align_right = Alignment(horizontal="right", vertical="center")
-
-    ws.merge_cells(f"A1:{last_col_let}1")
-    ws["A1"] = agency["name"]
-    ws["A1"].font = font_comp
-    ws["A1"].alignment = align_center
-
-    ws.merge_cells(f"A2:{last_col_let}2")
-    ws["A2"] = agency["address"]
-    ws["A2"].font = font_addr
-    ws["A2"].alignment = align_center
-
-    ws.merge_cells(f"A3:{last_col_let}3")
-    ws["A3"] = f"VIGILANCE ENFORCEMENT CELL, {circle_up} CIRCLE"
-    ws["A3"].font = font_title
-    ws["A3"].alignment = align_center
-
-    ws.merge_cells(f"A4:{last_col_let}4")
-    ws["A4"] = f"FIELD COLLECTION REGISTER - {month_name} {year}"
-    ws["A4"].font = font_title
-    ws["A4"].alignment = align_center
-
-    ws.merge_cells(f"A5:{last_col_let}5")
-    ws["A5"] = f"Circle: {circle_up} | Period: {month_name} {year}"
-    ws["A5"].font = font_meta
-    ws["A5"].alignment = align_center
-    ws["A5"].fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-
-    headers = [
-        "Sl No.", "Payment Date", "Division", "Subdivision", "Section",
-        "MR No.", "VCR No.", "Collecting Officer", "Team Name", "Amount Paid (Rs.)"
-    ]
-    for col_idx, h_text in enumerate(headers, 1):
-        cell = ws.cell(row=6, column=col_idx, value=h_text)
-        cell.font = font_th
-        cell.alignment = align_center
-        cell.fill = header_fill
-        cell.border = thin_border
-
-    current_row = 7
+    rows = []
     for idx, r in enumerate(records or [], 1):
-        raw_d = r.payment_date if hasattr(r, "payment_date") else r.get("payment_date")
-        if hasattr(raw_d, "strftime"):
-            d_str = raw_d.strftime("%d-%m-%Y")
-        else:
-            d_str = str(raw_d or "-")
+        rows.append([
+            idx,
+            str(_g(r, "vcr_number", "vcr_no", default="-")),
+            str(_g(r, "mr_number", "mr_no", default="-")),
+            _fmt_date(_g(r, "payment_date", default="-")),
+            _g(r, "division", default="-"),
+            _g(r, "subdivision", "sub_division", default="-"),
+            _g(r, "section", default="-"),
+            float(_g(r, "amount_paid", default=0.0)),
+        ])
 
-        div = getattr(r, "division", None) if hasattr(r, "division") else r.get("division")
-        subdiv = getattr(r, "subdivision", None) if hasattr(r, "subdivision") else r.get("subdivision")
-        sec = getattr(r, "section", None) if hasattr(r, "section") else r.get("section")
-        mr = getattr(r, "mr_no", None) if hasattr(r, "mr_no") else r.get("mr_no")
-        vcr = getattr(r, "vcr_no", None) if hasattr(r, "vcr_no") else r.get("vcr_no")
-        officer = getattr(r, "collecting_officer", None) if hasattr(r, "collecting_officer") else r.get("collecting_officer")
-        tm_name = getattr(r, "team_name", None) if hasattr(r, "team_name") else r.get("team_name")
-        amt = float(getattr(r, "amount_paid", 0.0) if hasattr(r, "amount_paid") else r.get("amount_paid", 0.0) or 0.0)
-
-        ws.cell(row=current_row, column=1, value=idx).alignment = align_center
-        ws.cell(row=current_row, column=2, value=d_str).alignment = align_center
-        ws.cell(row=current_row, column=3, value=div or "-").alignment = align_left
-        ws.cell(row=current_row, column=4, value=subdiv or "-").alignment = align_left
-        ws.cell(row=current_row, column=5, value=sec or "-").alignment = align_left
-        ws.cell(row=current_row, column=6, value=mr or "-").alignment = align_center
-        ws.cell(row=current_row, column=7, value=vcr or "-").alignment = align_center
-        ws.cell(row=current_row, column=8, value=officer or "-").alignment = align_left
-        ws.cell(row=current_row, column=9, value=tm_name or "-").alignment = align_left
-        
-        c_amt = ws.cell(row=current_row, column=10, value=amt)
-        c_amt.alignment = align_right
-        c_amt.number_format = "#,##0.00"
-
-        for col_idx in range(1, total_cols + 1):
-            c = ws.cell(row=current_row, column=col_idx)
-            c.border = thin_border
-            if not c.font.bold:
-                c.font = font_cell
-            if idx % 2 == 0:
-                c.fill = zebra_fill
-        current_row += 1
-
-    total_row = current_row
-    ws.merge_cells(f"A{total_row}:I{total_row}")
-    t_label = ws[f"A{total_row}"]
-    t_label.value = "TOTAL COLLECTIONS"
-    t_label.font = font_cell_bold
-    t_label.alignment = align_right
-
-    data_start = 7
-    data_end = total_row - 1 if records else 7
-    c_tot = ws.cell(row=total_row, column=10, value=f"=SUM(J{data_start}:J{data_end})" if records else 0)
-    c_tot.alignment = align_right
-    c_tot.font = font_cell_bold
-    c_tot.number_format = "#,##0.00"
-
-    for col_idx in range(1, total_cols + 1):
-        c = ws.cell(row=total_row, column=col_idx)
-        c.fill = total_fill
-        c.border = Border(left=Side(style='thin', color='444444'), right=Side(style='thin', color='444444'),
-                          top=Side(style='medium', color='000000'), bottom=Side(style='double', color='000000'))
-
-    # Signature
-    sig_row = total_row + 3
-    sig_col = get_column_letter(total_cols - 2)
-    ws.merge_cells(f"{sig_col}{sig_row}:{last_col_let}{sig_row}")
-    ws[f"{sig_col}{sig_row}"] = "Executive Engineer (Elect.)"
-    ws[f"{sig_col}{sig_row}"].font = font_cell_bold
-    ws[f"{sig_col}{sig_row}"].alignment = align_center
-
-    ws.merge_cells(f"{sig_col}{sig_row+1}:{last_col_let}{sig_row+1}")
-    ws[f"{sig_col}{sig_row+1}"] = "Enforcement & Vigilance Cell"
-    ws[f"{sig_col}{sig_row+1}"].font = font_cell
-    ws[f"{sig_col}{sig_row+1}"].alignment = align_center
-
-    ws.merge_cells(f"{sig_col}{sig_row+2}:{last_col_let}{sig_row+2}")
-    ws[f"{sig_col}{sig_row+2}"] = f"TPSODL, {circle_up} Circle"
-    ws[f"{sig_col}{sig_row+2}"].font = font_cell
-    ws[f"{sig_col}{sig_row+2}"].alignment = align_center
-
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 14
-    ws.column_dimensions["C"].width = 18
-    ws.column_dimensions["D"].width = 18
-    ws.column_dimensions["E"].width = 18
-    ws.column_dimensions["F"].width = 16
-    ws.column_dimensions["G"].width = 16
-    ws.column_dimensions["H"].width = 20
-    ws.column_dimensions["I"].width = 20
-    ws.column_dimensions["J"].width = 18
-
-    # SPREADSHEET PROTECTION: Read-only & Tamper-proof
-    apply_sheet_protection(ws)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+    _write_register(
+        ws, circle_name,
+        title_lines=[f"VIGILANCE ENFORCEMENT CELL, {circle_up} CIRCLE",
+                     f"MR COLLECTION REGISTER - {month_name} {year}"],
+        meta=f"Circle: {circle_up} | Period: {month_name} {year}",
+        headers=["Sl No.", "VCR No.", "MR No.", "Date of Payment", "Division",
+                 "Sub Division", "Section", "Amount Paid (Rs.)"],
+        widths=[7, 20, 20, 15, 22, 22, 22, 18],
+        rows=rows,
+        aligns=["c", "c", "c", "c", "l", "l", "l", "r"],
+        num_formats=[None, None, None, None, None, None, None, "#,##0.00"],
+        sum_cols=[8],
+        total_label="TOTAL AMOUNT PAID",
+        sig_lines=_ee_sig(circle_up),
+    )
+    return _save(wb, ws)
 
 
 # =========================================================================
-# 6. ALL LOAD BOOKINGS REGISTER (EXCEL)
+# 6. LOAD BOOKING REGISTER (EXCEL) - every booking entry of the month
 # =========================================================================
 def build_load_booking_excel(
     bookings: list,
     circle: Optional[str] = None,
     from_date: Optional[date] = None,
-    to_date: Optional[date] = None
+    to_date: Optional[date] = None,
+    period_label: Optional[str] = None
 ) -> bytes:
-    """
-    Exports a structured .xlsx register for all load bookings with:
-    - Sl No., Booking Date, Page No, Punching Officer, Team, Circle, Division, Subdivision, Section, PIN Code, Theft Category, Booked Load (kW), Status.
-    - Auto-calculated =SUM() for Booked Load (kW) column.
-    - Full worksheet protection (read-only, password locked with 'TPSODL@MIS').
-    """
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Load Bookings Register"
-    ws.views.sheetView[0].showGridLines = True
+    ws.title = "Load Booking Register"
 
     circle_up = (circle or "ALL CIRCLES").strip().upper()
-    agency = get_agency_header(circle if circle and circle != "ALL" else None)
-
-    total_cols = 13
-    last_col_let = get_column_letter(total_cols)
-
-    font_company = Font(name="Calibri", size=13, bold=True, color="000000")
-    font_address = Font(name="Calibri", size=9, bold=False, color="333333")
-    font_title = Font(name="Calibri", size=11, bold=True, color="000000")
-    font_sub = Font(name="Calibri", size=10, bold=True, color="1E3A8A")
-    font_meta = Font(name="Calibri", size=9, bold=True, color="1E293B")
-    
-    font_th = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_cell = Font(name="Calibri", size=9, bold=False, color="000000")
-    font_cell_bold = Font(name="Calibri", size=9, bold=True, color="000000")
-    font_theft = Font(name="Calibri", size=9, bold=True, color="B91C1C")
-
-    thin_border_side = Side(style='thin', color='444444')
-    thick_border_side = Side(style='medium', color='000000')
-    double_border_side = Side(style='double', color='000000')
-
-    grid_border = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=thin_border_side)
-    total_border = Border(left=thin_border_side, right=thin_border_side, top=thick_border_side, bottom=double_border_side)
-
-    header_fill = PatternFill(start_color="D0D0D0", end_color="D0D0D0", fill_type="solid")
-    total_fill = PatternFill(start_color="E2E2E2", end_color="E2E2E2", fill_type="solid")
-    zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-
-    align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
-    align_right = Alignment(horizontal="right", vertical="center")
-
-    # Row 1: Company Header
-    ws.merge_cells(f"A1:{last_col_let}1")
-    ws["A1"] = agency["name"]
-    ws["A1"].font = font_company
-    ws["A1"].alignment = align_center
-
-    # Row 2: Office Address
-    ws.merge_cells(f"A2:{last_col_let}2")
-    ws["A2"] = agency["address"]
-    ws["A2"].font = font_address
-    ws["A2"].alignment = align_center
-
-    # Row 3: TPSODL Title
-    ws.merge_cells(f"A3:{last_col_let}3")
-    ws["A3"] = "TP SOUTHERN ODISHA DISTRIBUTION LIMITED (TPSODL)"
-    ws["A3"].font = font_title
-    ws["A3"].alignment = align_center
-
-    # Row 4: Register Title
-    ws.merge_cells(f"A4:{last_col_let}4")
-    ws["A4"] = "CONSOLIDATED UNAUTHORIZED LOAD BOOKING REGISTER"
-    ws["A4"].font = font_sub
-    ws["A4"].alignment = align_center
-
-    # Row 5: Metadata
-    ws.merge_cells(f"A5:{last_col_let}5")
-    date_str = f"Date Range: {from_date} to {to_date}" if from_date and to_date else "All Dates"
-    ws["A5"] = f"Circle Scope: {circle_up}   |   {date_str}   |   Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    ws["A5"].font = font_meta
-    ws["A5"].alignment = align_center
-
-    # Row 6: Column Headers
-    headers = [
-        "Sl No.",
-        "Booking Date",
-        "Page No",
-        "Punching Officer",
-        "Team / Squad",
-        "Circle",
-        "Division",
-        "Subdivision",
-        "Section",
-        "PIN Code",
-        "Theft Category",
-        "Booked Load (kW)",
-        "Status"
-    ]
-
-    for col_idx, h_text in enumerate(headers, start=1):
-        cell = ws.cell(row=6, column=col_idx, value=h_text)
-        cell.font = font_th
-        cell.fill = header_fill
-        cell.alignment = align_center
-        cell.border = grid_border
-
-    start_data_row = 7
-    cur_row = start_data_row
-
-    for idx, b in enumerate(bookings, start=1):
-        ws.cell(row=cur_row, column=1, value=idx).alignment = align_center
-        ws.cell(row=cur_row, column=2, value=str(b.get("booking_date", ""))).alignment = align_center
-        ws.cell(row=cur_row, column=3, value=str(b.get("page_no") or "-")).alignment = align_center
-        ws.cell(row=cur_row, column=4, value=str(b.get("punch_emp") or "-")).alignment = align_left
-        ws.cell(row=cur_row, column=5, value=str(b.get("team_name") or "Unassigned")).alignment = align_left
-        ws.cell(row=cur_row, column=6, value=str(b.get("circle") or "-")).alignment = align_center
-        ws.cell(row=cur_row, column=7, value=str(b.get("division") or "-")).alignment = align_left
-        ws.cell(row=cur_row, column=8, value=str(b.get("subdivision") or "-")).alignment = align_left
-        ws.cell(row=cur_row, column=9, value=str(b.get("section") or "-")).alignment = align_left
-        ws.cell(row=cur_row, column=10, value=str(b.get("pincode") or "-")).alignment = align_center
-        
-        theft_c = ws.cell(row=cur_row, column=11, value=str(b.get("theft_type") or "-"))
-        theft_c.alignment = align_center
-        theft_c.font = font_theft
-        
-        load_val = float(b.get("booked_load") or 0.0)
-        load_c = ws.cell(row=cur_row, column=12, value=load_val)
-        load_c.alignment = align_right
-        load_c.font = font_cell_bold
-        load_c.number_format = "#,##0.00"
-
-        ws.cell(row=cur_row, column=13, value=str(b.get("status") or "PROCESSED")).alignment = align_center
-
-        row_fill = zebra_fill if idx % 2 == 0 else PatternFill(fill_type=None)
-        for c_idx in range(1, total_cols + 1):
-            cell = ws.cell(row=cur_row, column=c_idx)
-            cell.border = grid_border
-            if c_idx != 11 and c_idx != 12:
-                cell.font = font_cell
-            if row_fill.fill_type:
-                cell.fill = row_fill
-
-        cur_row += 1
-
-    end_data_row = cur_row - 1
-
-    # Total Row with =SUM() Formula
-    total_row = cur_row
-    ws.merge_cells(f"A{total_row}:K{total_row}")
-    ws[f"A{total_row}"] = "TOTAL BOOKED LOAD (kW):"
-    ws[f"A{total_row}"].font = font_cell_bold
-    ws[f"A{total_row}"].alignment = align_right
-    ws[f"A{total_row}"].fill = total_fill
-
-    sum_cell = ws.cell(row=total_row, column=12)
-    if end_data_row >= start_data_row:
-        sum_cell.value = f"=SUM(L{start_data_row}:L{end_data_row})"
+    if period_label:
+        period = period_label
+    elif from_date and to_date:
+        period = f"{_fmt_date(from_date)} to {_fmt_date(to_date)}"
     else:
-        sum_cell.value = 0.0
-    sum_cell.font = font_cell_bold
-    sum_cell.alignment = align_right
-    sum_cell.fill = total_fill
-    sum_cell.number_format = "#,##0.00"
+        period = "ALL DATES"
 
-    ws.cell(row=total_row, column=13, value="").fill = total_fill
+    rows = []
+    for idx, b in enumerate(bookings or [], 1):
+        rows.append([
+            idx,
+            _fmt_date(_g(b, "booking_date", default="-")),
+            str(_g(b, "page_no", default="-")),
+            _g(b, "punch_emp", default="-"),
+            _g(b, "team_name", default="Unassigned"),
+            _g(b, "circle", default="-"),
+            _g(b, "division", default="-"),
+            _g(b, "subdivision", default="-"),
+            _g(b, "section", default="-"),
+            str(_g(b, "pincode", default="-")),
+            _g(b, "theft_type", default="-"),
+            float(_g(b, "booked_load", default=0.0)),
+            _g(b, "status", default="PROCESSED"),
+        ])
 
-    for c_idx in range(1, total_cols + 1):
-        ws.cell(row=total_row, column=c_idx).border = total_border
-
-    # Signatures
-    sig_row = total_row + 4
-    ws.cell(row=sig_row, column=2, value="Prepared By (Enforcement Officer)").font = font_cell_bold
-    ws.cell(row=sig_row, column=2).alignment = align_center
-
-    sig_col = "J"
-    ws.merge_cells(f"{sig_col}{sig_row}:{last_col_let}{sig_row}")
-    ws[f"{sig_col}{sig_row}"] = "Executive Engineer (Elect.) / Authorized Signatory"
-    ws[f"{sig_col}{sig_row}"].font = font_cell_bold
-    ws[f"{sig_col}{sig_row}"].alignment = align_center
-
-    ws.merge_cells(f"{sig_col}{sig_row+1}:{last_col_let}{sig_row+1}")
-    ws[f"{sig_col}{sig_row+1}"] = f"TPSODL Enforcement Cell, {circle_up}"
-    ws[f"{sig_col}{sig_row+1}"].font = font_cell
-    ws[f"{sig_col}{sig_row+1}"].alignment = align_center
-
-    # Column widths
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 14
-    ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 22
-    ws.column_dimensions["E"].width = 22
-    ws.column_dimensions["F"].width = 16
-    ws.column_dimensions["G"].width = 20
-    ws.column_dimensions["H"].width = 20
-    ws.column_dimensions["I"].width = 20
-    ws.column_dimensions["J"].width = 12
-    ws.column_dimensions["K"].width = 16
-    ws.column_dimensions["L"].width = 18
-    ws.column_dimensions["M"].width = 14
-
-    # Enforce Read-Only Worksheet Protection
-    apply_sheet_protection(ws)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
+    _write_register(
+        ws, circle if circle and circle.upper() != "ALL" else None,
+        title_lines=["TP SOUTHERN ODISHA DISTRIBUTION LIMITED (TPSODL)",
+                     f"UNAUTHORIZED LOAD BOOKING REGISTER - {period.upper()}"],
+        meta=f"Circle: {circle_up} | Period: {period} | Generated On: {datetime.now().strftime('%d-%m-%Y %H:%M')}",
+        headers=["Sl No.", "Booking Date", "Page No", "Punching Officer", "Team / Squad", "Circle",
+                 "Division", "Sub Division", "Section", "PIN Code", "Theft Category",
+                 "Booked Load (kW)", "Status"],
+        widths=[7, 13, 10, 22, 20, 14, 18, 18, 18, 10, 16, 15, 13],
+        rows=rows,
+        aligns=["c", "c", "c", "l", "l", "c", "l", "l", "l", "c", "c", "r", "c"],
+        num_formats=[None] * 11 + ["#,##0.00", None],
+        sum_cols=[12],
+        total_label="TOTAL BOOKED LOAD (kW)",
+        sig_lines=_ee_sig(circle_up if circle_up != "ALL CIRCLES" else "ALL"),
+    )
+    return _save(wb, ws)

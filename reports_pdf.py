@@ -301,7 +301,8 @@ def build_circle_log_pdf(circle_name: str, year: int, month: int, rows: list, to
 
 # =========================================================================
 # 2. FORM D ATTENDANCE
-#    Total row sums ONLY the last four summary columns.
+#    Employees are listed team-wise (grouped & sorted), with a team header
+#    row before each team. Total row sums ONLY the last four summary columns.
 # =========================================================================
 _STATUS_FMT = {
     "P": "P",
@@ -309,6 +310,17 @@ _STATUS_FMT = {
     "L": '<font color="#b45309"><b>L</b></font>',
     "WO": '<font color="#475569" size="5"><b>WO</b></font>',   # smaller so it never wraps in a narrow day column
 }
+
+
+def _att_status(attendance_map: dict, emp: dict, year: int, month: int, d: int) -> str:
+    """Looks up a day's status; accepts (emp_id, 'YYYY-MM-DD') or {emp_code: {day: status}} maps."""
+    date_key = f"{year}-{str(month).zfill(2)}-{str(d).zfill(2)}"
+    status = attendance_map.get((emp.get('id'), date_key))
+    if status is None:
+        by_code = attendance_map.get(emp.get('emp_code'))
+        if isinstance(by_code, dict):
+            status = by_code.get(d)
+    return status or "-"
 
 
 def build_form_d_pdf(
@@ -369,17 +381,26 @@ def build_form_d_pdf(
         Paragraph("Weekly<br/>Off", st['th_sm']),
     ]
     data = [headers]
+    n_cols = len(headers)
 
     grand_p = grand_a = grand_l = grand_wo = 0
+    team_header_rows = []
+    emp_rows = []
+    current_team = object()
+    show_team_rows = not team_name   # single-team report already names the team in the header
 
     for idx, emp in enumerate(employees, start=1):
-        emp_id = emp.get('id')
+        emp_team = emp.get('team_name') or "UNASSIGNED"
+        if show_team_rows and emp_team != current_team:
+            current_team = emp_team
+            team_header_rows.append(len(data))
+            data.append([Paragraph(f"<b>TEAM: {t(emp_team.upper())}</b>", st['cell'])] + [""] * (n_cols - 1))
+
         p_c = a_c = l_c = wo_c = 0
         day_cells = []
 
         for d in range(1, num_days + 1):
-            date_key = f"{year}-{str(month).zfill(2)}-{str(d).zfill(2)}"
-            status = attendance_map.get((emp_id, date_key), "-")
+            status = _att_status(attendance_map, emp, year, month, d)
 
             if status == "P":
                 p_c += 1
@@ -397,6 +418,7 @@ def build_form_d_pdf(
         grand_l += l_c
         grand_wo += wo_c
 
+        emp_rows.append(len(data))
         data.append([
             Paragraph(str(idx), st['cell_center']),
             Paragraph(t(emp.get('designation') or '-'), st['cell_sm']),
@@ -409,7 +431,7 @@ def build_form_d_pdf(
         ])
 
     if not employees:
-        data.append([Paragraph("No employees found.", st['cell_center'])] + [""] * (len(headers) - 1))
+        data.append([Paragraph("No employees found.", st['cell_center'])] + [""] * (n_cols - 1))
 
     # ---- total row: label + the four summary totals only; day cells stay blank
     data.append([
@@ -432,9 +454,18 @@ def build_form_d_pdf(
         ('SPAN', (0, last), (2, last)),
         ('SPAN', (first_day_col, last), (last_day_col, last)),
     ]
-    # light shading on Sunday columns (body rows only)
-    for c in sundays:
-        cmds.append(('BACKGROUND', (c, 1), (c, last - 1), SUNDAY_BG))
+    # light shading on Sunday columns (employee rows only)
+    for r in emp_rows:
+        for c in sundays:
+            cmds.append(('BACKGROUND', (c, r), (c, r), SUNDAY_BG))
+    # team header rows span the full width
+    for r in team_header_rows:
+        cmds += [
+            ('SPAN', (0, r), (-1, r)),
+            ('BACKGROUND', (0, r), (-1, r), HEADER_BG),
+            ('LINEABOVE', (0, r), (-1, r), 1.0, colors.black),
+            ('LEFTPADDING', (0, r), (-1, r), 6),
+        ]
     # emphasise the four summary columns
     cmds.append(('LINEBEFORE', (sum_cols[0], 0), (sum_cols[0], -1), 1.0, NAVY))
     cmds += total_row_style(last)
@@ -457,6 +488,7 @@ def build_form_d_pdf(
     cb = make_signature_footer(sig_lines)
     doc.build(story, onFirstPage=cb, onLaterPages=cb)
     return buffer.getvalue()
+
 
 
 # =========================================================================
@@ -548,8 +580,17 @@ def build_team_log_pdf(team_name: str, circle: str, team_lead: str, year: int, m
 
 
 # =========================================================================
-# 4. TEAM PERFORMANCE REPORT
+# 4. TEAM PERFORMANCE REPORT (month-wise, one row per team, no date column)
 # =========================================================================
+def _g(r, *keys, default=None):
+    """Read the first non-empty value from a dict or ORM object across alternate key names."""
+    for k in keys:
+        v = r.get(k) if isinstance(r, dict) else getattr(r, k, None)
+        if v not in (None, ""):
+            return v
+    return default
+
+
 def build_team_performance_pdf(
     circle_name: str,
     year: int,
@@ -572,70 +613,68 @@ def build_team_performance_pdf(
     )
 
     headers = [
-        Paragraph("Date", st['th']),
+        Paragraph("Sl", st['th']),
         Paragraph("Team Name", st['th']),
-        Paragraph("Mode of Team Operation", st['th']),
+        Paragraph("Team Leader", st['th']),
+        Paragraph("Supervisor", st['th']),
         Paragraph("Load Booked<br/>(KW)", st['th']),
         Paragraph("Amount Coll.<br/>(Rs.)", st['th']),
         Paragraph("No. of<br/>DC", st['th']),
-        Paragraph("KM Run<br/>(Day)", st['th']),
-        Paragraph("Emp<br/>Present", st['th']),
+        Paragraph("KM Run", st['th']),
+        Paragraph("Emp Present<br/>(Man-days)", st['th']),
     ]
     data = [headers]
 
     tot_load = tot_amount = 0.0
-    tot_dc = tot_km = 0
+    tot_dc = tot_km = tot_emp = 0
 
-    for r in performance_rows:
-        load_val = float(r.get('load_booked', 0.0) or 0.0)
-        amt_val = float(r.get('amount_collected', 0.0) or 0.0)
-        dc_val = int(r.get('number_of_dc', 0) or 0)
-        km_val = int(r.get('total_km', 0) or 0)
+    for idx, r in enumerate(performance_rows or [], start=1):
+        load_val = float(_g(r, 'load_booked_kw', 'load_booked', default=0.0))
+        amt_val = float(_g(r, 'amount_collected', default=0.0))
+        dc_val = int(_g(r, 'dc_count', 'number_of_dc', default=0))
+        km_val = int(_g(r, 'km_run', 'total_km', default=0))
+        emp_val = int(_g(r, 'emp_present_count', default=0))
 
         tot_load += load_val
         tot_amount += amt_val
         tot_dc += dc_val
         tot_km += km_val
-
-        mode = r.get('operation_mode') or 'Operated Independently'
-        if mode == "Merged" and r.get('merged_with_team'):
-            mode = f"Merged with {r.get('merged_with_team')}"
-        elif not r.get('team_leader_present', True):
-            mode += " (TL Absent)"
+        tot_emp += emp_val
 
         data.append([
-            Paragraph(fmt_date(r.get('date', '')), st['cell_center']),
-            Paragraph(t(r.get('team_name', '')), st['cell']),
-            Paragraph(t(mode), st['cell']),
-            Paragraph(f"{load_val:.2f}", st['cell_center']),
+            Paragraph(str(idx), st['cell_center']),
+            Paragraph(t(_g(r, 'team_name', default='-')), st['cell']),
+            Paragraph(t(_g(r, 'assigned_team_lead', 'team_lead', default='-')), st['cell']),
+            Paragraph(t(_g(r, 'supervisor_name', 'supervisor', default='-')), st['cell']),
+            Paragraph(f"{load_val:,.2f}", st['cell_center']),
             Paragraph(f"{amt_val:,.2f}", st['cell_center']),
             Paragraph(str(dc_val), st['cell_center']),
             Paragraph(str(km_val), st['cell_center']),
-            Paragraph(str(r.get('emp_present_count', 0)), st['cell_bold_center']),
+            Paragraph(str(emp_val), st['cell_bold_center']),
         ])
 
     if not performance_rows:
-        data.append([Paragraph("No performance records found for this period.", st['cell_center'])] + [""] * 7)
+        data.append([Paragraph("No performance records found for this period.", st['cell_center'])] + [""] * 8)
 
     data.append([
         Paragraph("TOTAL", st['cell_bold_right']),
-        "", "",
-        Paragraph(f"{tot_load:.2f}", st['cell_bold_center']),
+        "", "", "",
+        Paragraph(f"{tot_load:,.2f}", st['cell_bold_center']),
         Paragraph(f"{tot_amount:,.2f}", st['cell_bold_center']),
         Paragraph(str(tot_dc), st['cell_bold_center']),
         Paragraph(str(tot_km), st['cell_bold_center']),
-        Paragraph("-", st['cell_bold_center']),
+        Paragraph(str(tot_emp), st['cell_bold_center']),
     ])
     last = len(data) - 1
 
-    cmds = base_table_style(pad=3) + [
+    cmds = base_table_style(pad=4) + [
         ('ROWBACKGROUNDS', (0, 1), (-1, last - 1), [colors.white, ZEBRA]),
-        ('SPAN', (0, last), (2, last)),
+        ('SPAN', (0, last), (3, last)),
     ] + total_row_style(last)
     if not performance_rows:
         cmds.append(('SPAN', (0, 1), (-1, 1)))
 
-    table = Table(data, colWidths=fit([60, 130, 200, 75, 95, 55, 65, 60], usable), repeatRows=1)
+    table = Table(data, colWidths=fit([30, 140, 135, 135, 80, 95, 55, 65, 75], usable), repeatRows=1)
     table.setStyle(TableStyle(cmds))
     story.append(table)
 
@@ -644,9 +683,8 @@ def build_team_performance_pdf(
     return buffer.getvalue()
 
 
-
 # =========================================================================
-# 5. FIELD COLLECTION REGISTER (PDF)
+# 5. MR COLLECTION REGISTER (PDF) - every MR entry of the month
 # =========================================================================
 def build_collection_pdf(
     circle_name: str,
@@ -658,76 +696,63 @@ def build_collection_pdf(
     month_name = calendar.month_name[month].upper()
     circle_up = circle_name.upper()
 
-    doc = new_doc(buffer, f"Collection Register - {circle_up} - {month_name} {year}", margin_lr=28, top=28)
+    doc = new_doc(buffer, f"MR Collection Register - {circle_up} - {month_name} {year}", margin_lr=28, top=28)
     usable = PAGE_W - 56
     st = get_report_styles()
     story = []
 
     add_header(
         story, st, circle_name,
-        [f"FIELD COLLECTION REGISTER - {month_name} {year}"],
+        [f"MR COLLECTION REGISTER - {month_name} {year}"],
         sub_line=f"Enforcement & Vigilance Cell | Circle: {t(circle_up)}",
     )
 
     headers = [
         Paragraph("Sl", st['th']),
-        Paragraph("Payment<br/>Date", st['th']),
-        Paragraph("Division", st['th']),
-        Paragraph("Subdivision", st['th']),
-        Paragraph("Section", st['th']),
-        Paragraph("MR No.", st['th']),
         Paragraph("VCR No.", st['th']),
-        Paragraph("Collecting Officer", st['th']),
-        Paragraph("Team Name", st['th']),
+        Paragraph("MR No.", st['th']),
+        Paragraph("Date of<br/>Payment", st['th']),
+        Paragraph("Division", st['th']),
+        Paragraph("Sub Division", st['th']),
+        Paragraph("Section", st['th']),
         Paragraph("Amount<br/>Paid (Rs.)", st['th']),
     ]
     data = [headers]
 
     tot_amount = 0.0
     for idx, r in enumerate(records or [], start=1):
-        raw_d = getattr(r, "payment_date", None) if hasattr(r, "payment_date") else r.get("payment_date")
-        div = getattr(r, "division", None) if hasattr(r, "division") else r.get("division")
-        subdiv = getattr(r, "subdivision", None) if hasattr(r, "subdivision") else r.get("subdivision")
-        sec = getattr(r, "section", None) if hasattr(r, "section") else r.get("section")
-        mr = getattr(r, "mr_no", None) if hasattr(r, "mr_no") else r.get("mr_no")
-        vcr = getattr(r, "vcr_no", None) if hasattr(r, "vcr_no") else r.get("vcr_no")
-        officer = getattr(r, "collecting_officer", None) if hasattr(r, "collecting_officer") else r.get("collecting_officer")
-        tm_name = getattr(r, "team_name", None) if hasattr(r, "team_name") else r.get("team_name")
-        amt = float(getattr(r, "amount_paid", 0.0) if hasattr(r, "amount_paid") else r.get("amount_paid", 0.0) or 0.0)
-
+        amt = float(_g(r, "amount_paid", default=0.0))
         tot_amount += amt
 
         data.append([
             Paragraph(str(idx), st['cell_center']),
-            Paragraph(fmt_date(raw_d), st['cell_center']),
-            Paragraph(t(div or "-"), st['cell']),
-            Paragraph(t(subdiv or "-"), st['cell']),
-            Paragraph(t(sec or "-"), st['cell']),
-            Paragraph(t(mr or "-"), st['cell_center']),
-            Paragraph(t(vcr or "-"), st['cell_center']),
-            Paragraph(t(officer or "-"), st['cell']),
-            Paragraph(t(tm_name or "-"), st['cell']),
+            Paragraph(t(_g(r, "vcr_number", "vcr_no", default="-")), st['cell_center']),
+            Paragraph(t(_g(r, "mr_number", "mr_no", default="-")), st['cell_center']),
+            Paragraph(fmt_date(_g(r, "payment_date", default="-")), st['cell_center']),
+            Paragraph(t(_g(r, "division", default="-")), st['cell']),
+            Paragraph(t(_g(r, "subdivision", "sub_division", default="-")), st['cell']),
+            Paragraph(t(_g(r, "section", default="-")), st['cell']),
             Paragraph(f"{amt:,.2f}", st['cell_bold_right']),
         ])
 
     if not records:
-        data.append([Paragraph("No collection records found for this period.", st['cell_center'])] + [""] * 9)
+        data.append([Paragraph("No MR collection records found for this period.", st['cell_center'])] + [""] * 7)
 
     data.append([
-        Paragraph("TOTAL COLLECTIONS", st['cell_bold_right']),
-        "", "", "", "", "", "", "", "",
+        Paragraph("TOTAL AMOUNT PAID", st['cell_bold_right']),
+        "", "", "", "", "", "",
         Paragraph(f"{tot_amount:,.2f}", st['cell_bold_right']),
     ])
     last = len(data) - 1
 
     cmds = base_table_style(pad=3) + [
         ('ROWBACKGROUNDS', (0, 1), (-1, last - 1), [colors.white, ZEBRA]),
-        ('SPAN', (0, last), (8, last)),
+        ('SPAN', (0, last), (6, last)),
     ] + total_row_style(last)
     if not records:
         cmds.append(('SPAN', (0, 1), (-1, 1)))
 
-    table = Table(data, colWidths=fit([30, 65, 80, 80, 80, 75, 75, 110, 100, 90], usable), repeatRows=1)
+    table = Table(data, colWidths=fit([30, 110, 110, 75, 120, 120, 120, 95], usable), repeatRows=1)
     table.setStyle(TableStyle(cmds))
     story.append(table)
 
@@ -737,34 +762,33 @@ def build_collection_pdf(
 
 
 # =========================================================================
-# 6. ALL LOAD BOOKINGS REGISTER (PDF)
+# 6. LOAD BOOKING REGISTER (PDF) - every booking entry of the month
 # =========================================================================
 def build_load_booking_pdf(
     bookings: list,
     circle: Optional[str] = None,
     from_date: Optional[date] = None,
-    to_date: Optional[date] = None
+    to_date: Optional[date] = None,
+    period_label: Optional[str] = None
 ) -> bytes:
-    """
-    Generates an A4 landscape ReportLab PDF summarizing all load booking entries with:
-    - Official TPSODL corporate headers.
-    - Comprehensive table layout with auto-wrapped cells.
-    - Total Booked Load summary row.
-    - Enforcement Cell Executive Engineer signature block.
-    """
     buffer = io.BytesIO()
     circle_up = (circle or "ALL CIRCLES").strip().upper()
-    date_str = f"{from_date} to {to_date}" if from_date and to_date else "ALL DATES"
+    if period_label:
+        date_str = period_label
+    elif from_date and to_date:
+        date_str = f"{fmt_date(from_date)} to {fmt_date(to_date)}"
+    else:
+        date_str = "ALL DATES"
 
-    doc = new_doc(buffer, f"Load Bookings Register - {circle_up}", margin_lr=28, top=28)
-    usable = PAGE_W - 56
+    doc = new_doc(buffer, f"Load Booking Register - {circle_up} - {date_str}", margin_lr=24, top=28)
+    usable = PAGE_W - 48
     st = get_report_styles()
     story = []
 
     add_header(
-        story, st, circle if circle and circle != "ALL" else None,
-        ["CONSOLIDATED UNAUTHORIZED LOAD BOOKING REGISTER"],
-        sub_line=f"Enforcement & Vigilance Cell | Scope: {t(circle_up)} | Period: {date_str}",
+        story, st, circle if circle and circle.upper() != "ALL" else None,
+        [f"UNAUTHORIZED LOAD BOOKING REGISTER - {t(date_str.upper())}"],
+        sub_line=f"Enforcement & Vigilance Cell | Circle: {t(circle_up)}",
     )
 
     headers = [
@@ -773,7 +797,8 @@ def build_load_booking_pdf(
         Paragraph("Page<br/>No.", st['th']),
         Paragraph("Officer", st['th']),
         Paragraph("Team", st['th']),
-        Paragraph("Circle / Div", st['th']),
+        Paragraph("Division", st['th']),
+        Paragraph("Sub Division", st['th']),
         Paragraph("Section", st['th']),
         Paragraph("Theft Type", st['th']),
         Paragraph("Load<br/>(kW)", st['th']),
@@ -783,38 +808,29 @@ def build_load_booking_pdf(
 
     tot_load = 0.0
     for idx, b in enumerate(bookings or [], start=1):
-        b_date = b.get("booking_date")
-        page_no = b.get("page_no") or "-"
-        officer = b.get("punch_emp") or "-"
-        team = b.get("team_name") or "-"
-        circ = b.get("circle") or "-"
-        div = b.get("division") or "-"
-        sec = b.get("section") or "-"
-        theft = b.get("theft_type") or "-"
-        load_kw = float(b.get("booked_load") or 0.0)
-        status = b.get("status") or "PROCESSED"
-
+        load_kw = float(_g(b, "booked_load", default=0.0))
         tot_load += load_kw
 
         data.append([
             Paragraph(str(idx), st['cell_center']),
-            Paragraph(str(b_date), st['cell_center']),
-            Paragraph(t(page_no), st['cell_center']),
-            Paragraph(t(officer), st['cell']),
-            Paragraph(t(team), st['cell']),
-            Paragraph(f"{t(circ)}<br/><font size='6.5' color='#555555'>{t(div)}</font>", st['cell']),
-            Paragraph(t(sec), st['cell']),
-            Paragraph(t(theft), st['cell_center']),
+            Paragraph(fmt_date(_g(b, "booking_date", default="-")), st['cell_center']),
+            Paragraph(t(_g(b, "page_no", default="-")), st['cell_center']),
+            Paragraph(t(_g(b, "punch_emp", default="-")), st['cell_sm']),
+            Paragraph(t(_g(b, "team_name", default="-")), st['cell_sm']),
+            Paragraph(t(_g(b, "division", default="-")), st['cell_sm']),
+            Paragraph(t(_g(b, "subdivision", default="-")), st['cell_sm']),
+            Paragraph(t(_g(b, "section", default="-")), st['cell_sm']),
+            Paragraph(t(_g(b, "theft_type", default="-")), st['cell_center']),
             Paragraph(f"{load_kw:,.2f}", st['cell_bold_right']),
-            Paragraph(t(status), st['cell_center']),
+            Paragraph(t(_g(b, "status", default="PROCESSED")), st['cell_center']),
         ])
 
     if not bookings:
-        data.append([Paragraph("No load booking records found for this period.", st['cell_center'])] + [""] * 9)
+        data.append([Paragraph("No load booking records found for this period.", st['cell_center'])] + [""] * 10)
 
     data.append([
         Paragraph("TOTAL BOOKED LOAD (kW)", st['cell_bold_right']),
-        "", "", "", "", "", "", "",
+        "", "", "", "", "", "", "", "",
         Paragraph(f"{tot_load:,.2f}", st['cell_bold_right']),
         "",
     ])
@@ -822,15 +838,15 @@ def build_load_booking_pdf(
 
     cmds = base_table_style(pad=3) + [
         ('ROWBACKGROUNDS', (0, 1), (-1, last - 1), [colors.white, ZEBRA]),
-        ('SPAN', (0, last), (7, last)),
+        ('SPAN', (0, last), (8, last)),
     ] + total_row_style(last)
     if not bookings:
         cmds.append(('SPAN', (0, 1), (-1, 1)))
 
-    table = Table(data, colWidths=fit([25, 60, 50, 95, 95, 110, 100, 85, 75, 60], usable), repeatRows=1)
+    table = Table(data, colWidths=fit([25, 58, 40, 90, 90, 85, 85, 85, 75, 60, 60], usable), repeatRows=1)
     table.setStyle(TableStyle(cmds))
     story.append(table)
 
-    cb = make_signature_footer(EE_SIGNATURE(circle if circle and circle != "ALL" else None))
+    cb = make_signature_footer(EE_SIGNATURE(circle if circle and circle.upper() != "ALL" else "ALL"))
     doc.build(story, onFirstPage=cb, onLaterPages=cb)
     return buffer.getvalue()

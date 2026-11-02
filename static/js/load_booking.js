@@ -1,3 +1,40 @@
+
+// Global flag for duplicate override
+window._allowDuplicateLb = false;
+
+function showDuplicateLbModal(data, onConfirm) {
+    const modalEl = document.getElementById('duplicateVcrModal');
+    if (!modalEl) {
+        if (confirm(`${data.details || 'Duplicate VCR found.'}\n\nDo you want to proceed and save anyway?`)) {
+            onConfirm();
+        }
+        return;
+    }
+    const msgEl = document.getElementById('duplicateVcrModalMsg');
+    const detailsEl = document.getElementById('duplicateVcrDetails');
+    if (msgEl) {
+        msgEl.innerHTML = `VCR Number <strong>${data.vcr_number}</strong> has already been recorded.`;
+    }
+    if (detailsEl) {
+        detailsEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-warning me-1"></i> ${data.details || 'A record with this VCR number already exists.'}`;
+    }
+
+    const modal = new bootstrap.Modal(modalEl);
+    const confirmBtn = document.getElementById('btnConfirmDuplicate');
+    
+    const handleConfirm = () => {
+        modal.hide();
+        confirmBtn.removeEventListener('click', handleConfirm);
+        onConfirm();
+    };
+
+    // Remove any previous listener
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    newConfirmBtn.addEventListener('click', handleConfirm);
+
+    modal.show();
+}
 // Official TPSODL Electrical Hierarchy & Real-Time Load Booking Entry Desk
 
 const TPSODL_HIERARCHY = {
@@ -140,6 +177,44 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pageEl) pageEl.classList.remove('is-invalid');
             const alertBox = document.getElementById('lbPageErrorAlert');
             if (alertBox) alertBox.style.display = 'none';
+        });
+    }
+
+    loadRecentLoadBookings();
+
+    // Search by Page Number
+    const btnSearchPage = document.getElementById('btnSearchPageNo');
+    const inputSearchPage = document.getElementById('lbSearchPageNo');
+    const btnClearPage = document.getElementById('btnClearLbSearch');
+    if (btnSearchPage && inputSearchPage) {
+        btnSearchPage.addEventListener('click', () => {
+            loadRecentLoadBookings(inputSearchPage.value.trim());
+        });
+        inputSearchPage.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadRecentLoadBookings(inputSearchPage.value.trim());
+            }
+        });
+    }
+    if (btnClearPage && inputSearchPage) {
+        btnClearPage.addEventListener('click', () => {
+            inputSearchPage.value = '';
+            loadRecentLoadBookings();
+        });
+    }
+
+    // Export Load Bookings to Excel
+    const btnExportLb = document.getElementById('btnExportLbExcel');
+    if (btnExportLb) {
+        btnExportLb.addEventListener('click', () => {
+            const sDate = document.getElementById('lbExportStartDate')?.value || '';
+            const eDate = document.getElementById('lbExportEndDate')?.value || '';
+            const params = new URLSearchParams();
+            if (sDate) params.append('start_date', sDate);
+            if (eDate) params.append('end_date', eDate);
+            if (resolvedCircle) params.append('circle', resolvedCircle);
+            window.location.href = `/api/load-booking/export-excel?${params.toString()}`;
         });
     }
 
@@ -374,6 +449,24 @@ async function submitLoadBooking(e) {
     const theftType = theftTypeSelect ? theftTypeSelect.value : 'Hooking';
 
     const bookingDate = document.getElementById('lbBookingDate').value || new Date().toISOString().split('T')[0];
+    const vcrInput = document.getElementById('lbVcrNumber');
+    const vcrNum = vcrInput ? vcrInput.value.trim() : '';
+
+    if (vcrNum && !window._allowDuplicateLb) {
+        try {
+            const checkRes = await fetch(`/api/vcr/check-exists?vcr_number=${encodeURIComponent(vcrNum)}&form_type=lb`);
+            const checkData = await checkRes.json();
+            if (checkData.exists) {
+                showDuplicateLbModal(checkData, () => {
+                    window._allowDuplicateLb = true;
+                    document.getElementById('formLoadBooking').dispatchEvent(new Event('submit'));
+                });
+                return;
+            }
+        } catch(chkErr) {
+            console.warn("Duplicate check error:", chkErr);
+        }
+    }
 
     setButtonLoading('btnSaveLBk', true);
 
@@ -390,8 +483,14 @@ async function submitLoadBooking(e) {
         subdivision: subdivision,
         section: section,
         theft_type: theftType,
-        booked_load: bookedLoadVal
+        booked_load: bookedLoadVal,
+        vcr_number: vcrNum || null,
+        allow_duplicate: !!window._allowDuplicateLb
     };
+
+    if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
+        payload.team_id = window.getUserSquadId();
+    }
 
     try {
         const res = await fetch('/api/load-booking/save', {
@@ -414,11 +513,21 @@ async function submitLoadBooking(e) {
             pageInput.focus();
         }
         if (loadInput) loadInput.value = '';
+        if (vcrInput) vcrInput.value = '';
+        window._allowDuplicateLb = false;
 
         const alertBox = document.getElementById('lbPageErrorAlert');
         if (alertBox) alertBox.style.display = 'none';
+        loadRecentLoadBookings();
     } catch(err) {
         const errDetail = err.message || "";
+        if (errDetail.includes("Confirm to proceed")) {
+            showDuplicateLbModal({ vcr_number: vcrNum, details: errDetail }, () => {
+                window._allowDuplicateLb = true;
+                document.getElementById('formLoadBooking').dispatchEvent(new Event('submit'));
+            });
+            return;
+        }
         if (errDetail.toLowerCase().includes("duplicate") || errDetail.toLowerCase().includes("already been booked")) {
             if (pageInput) {
                 pageInput.classList.add('is-invalid');
@@ -436,3 +545,91 @@ async function submitLoadBooking(e) {
         setButtonLoading('btnSaveLBk', false, '<i class="fa-solid fa-floppy-disk me-1"></i> 💾 Submit Load Booking');
     }
 }
+
+async function loadRecentLoadBookings(pageNo = null) {
+    const tbody = document.getElementById('recentBookingsTbody');
+    if (!tbody) return;
+
+    const isUser = typeof window.isSquadUser === 'function' && window.isSquadUser();
+    const actionsHeader = document.getElementById('lbActionsHeader');
+    if (isUser && actionsHeader) {
+        actionsHeader.innerText = "Status";
+    }
+
+    try {
+        let url = '/api/load-booking/recent?limit=' + (pageNo ? '50' : '5');
+        if (pageNo) url += '&page_no=' + encodeURIComponent(pageNo);
+        const res = await fetch(url);
+        const bookings = await res.json();
+
+        if (!bookings || !bookings.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">No recent load bookings found.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = bookings.map(b => {
+            const isLocked = !!b.is_locked;
+            const lockBadge = isLocked
+                ? '<span class="badge bg-secondary"><i class="fa-solid fa-lock me-1"></i> Locked</span>'
+                : '<span class="badge bg-success"><i class="fa-solid fa-unlock me-1"></i> Unlocked</span>';
+
+            let actionButtons = '';
+            if (isUser) {
+                actionButtons = '<span class="text-muted small"><i class="fa-solid fa-lock me-1"></i>Immutable</span>';
+            } else {
+                actionButtons = `
+                    <div class="d-inline-flex gap-1">
+                        <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="toggleBookingLock(${b.id})" title="Toggle Lock Status">
+                            <i class="fa-solid ${isLocked ? 'fa-lock-open text-primary' : 'fa-lock text-secondary'}"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" onclick="deleteBookingEntry(${b.id})" title="Delete Booking">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+            }
+
+            return `
+                <tr>
+                    <td class="fw-semibold text-dark">${b.booking_date}</td>
+                    <td><code>${b.book_number}</code> / <strong>${b.page_no}</strong></td>
+                    <td><code>${b.vcr_number || '-'}</code></td>
+                    <td><span class="badge bg-light text-dark border">${b.team_name}</span> <small class="text-muted">(${b.circle})</small></td>
+                    <td><small class="text-muted">${b.subdivision || '-'} / ${b.section || '-'}</small></td>
+                    <td><span class="badge bg-info-subtle text-info-emphasis border">${b.theft_type}</span></td>
+                    <td><strong class="text-primary">${b.booked_load} kW</strong></td>
+                    <td>${lockBadge}</td>
+                    <td class="text-end">${actionButtons}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch(err) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-3">Failed to load recent bookings: ${err.message}</td></tr>`;
+    }
+}
+
+async function deleteBookingEntry(bookingId) {
+    if (!confirm("Are you sure you want to delete this load booking record?")) return;
+    try {
+        const res = await fetch(`/api/load-booking/${bookingId}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || "Failed to delete booking");
+        showToast(d.message || "Load booking deleted successfully", "success");
+        loadRecentLoadBookings();
+    } catch(err) {
+        showToast(err.message, "danger");
+    }
+}
+
+async function toggleBookingLock(bookingId) {
+    try {
+        const res = await fetch(`/api/load-booking/${bookingId}/toggle-lock`, { method: 'PATCH' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || "Failed to toggle lock");
+        showToast(d.message || "Lock state updated", "success");
+        loadRecentLoadBookings();
+    } catch(err) {
+        showToast(err.message, "danger");
+    }
+}
+
