@@ -1,22 +1,34 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install system dependencies needed for compiling psycopg2 and image/font rendering
+# 1. Install system build tools and shared graphic/DB libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    gcc \
+    g++ \
     libpq-dev \
+    python3-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    libfreetype6-dev \
+    libpng-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 2. Upgrade core packaging tools (ensures manylinux binary wheels match)
+RUN pip install --upgrade pip setuptools wheel
 
-# Copy all application files (routers, static, templates, python modules)
+# 3. Install dependencies
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# 4. Copy application source
 COPY . .
 
 EXPOSE 8000
