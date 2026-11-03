@@ -26,7 +26,7 @@ Usage:
 NOTE: run only ONE scheduler (this file OR send_message.py / the in-app scheduler),
 otherwise the group receives every report twice.
 """
-
+from __future__ import annotations
 import argparse
 import base64
 import io

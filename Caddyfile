@@ -1,17 +1,7 @@
+{
+    admin off
+}
 
-# Or if accessing directly via VPS IP or port 80:
-enfloadbook.duckdns.org{
-    request_body {
-        max_size 50MB
-    }
-
-    # Proxy to FastAPI app container
-    handle {
-        reverse_proxy fastapi-web:8000
-    }
-
-    log {
-        output file /var/log/caddy/access.log
-        format console
-    }
+enfloadbook.duckdns.org {
+    reverse_proxy fastapi-web:8000
 }
