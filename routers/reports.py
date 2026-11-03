@@ -80,14 +80,7 @@ def export_form_d(
         if status:
             attendance_map[(emp_id, op_date.strftime("%Y-%m-%d"))] = status
 
-    # Populate Sundays as WO by default if missing
-    _, num_days = calendar.monthrange(year, month)
-    for day in range(1, num_days + 1):
-        d_obj = date(year, month, day)
-        if d_obj.weekday() == 6:  # Sunday
-            key_date = d_obj.strftime("%Y-%m-%d")
-            for emp_id in emp_ids:
-                attendance_map.setdefault((emp_id, key_date), "WO")
+    # Weekly offs (WO) and working days are driven strictly by actual attendance records
 
     if format.lower() == "pdf":
         file_bytes = reports_pdf.build_form_d_pdf(
@@ -288,18 +281,32 @@ def export_squad_performance(
         extract('month', VehicleLogBook.date) == month
     ).group_by(VehicleLogBook.team_id).all())
 
-    # Employee present man-days by team (count of 'P' marks in the month)
-    present_map = dict(db.query(
+    # Employee attendance man-days by team (P, WO, A, L)
+    att_team_counts = db.query(
         Employee.team_id,
+        Attendance.status,
         func.count(Attendance.employee_id)
-    ).join(Employee, Attendance.employee_id == Employee.id)
-     .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)
+    ).join(Employee, Attendance.employee_id == Employee.id)\
+     .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)\
      .filter(
         Employee.circle == circle_up,
-        Attendance.status == "P",
         extract('year', DailyTeamOperation.operation_date) == year,
         extract('month', DailyTeamOperation.operation_date) == month
-    ).group_by(Employee.team_id).all())
+    ).group_by(Employee.team_id, Attendance.status).all()
+
+    present_map = {}
+    wo_map = {}
+    absent_map = {}
+    leave_map = {}
+    for tid, st, cnt in att_team_counts:
+        if st == "P":
+            present_map[tid] = cnt
+        elif st == "WO":
+            wo_map[tid] = cnt
+        elif st == "A":
+            absent_map[tid] = cnt
+        elif st == "L":
+            leave_map[tid] = cnt
 
     performance_rows = []
     for idx, t in enumerate(teams, start=1):
@@ -315,6 +322,9 @@ def export_squad_performance(
             "dc_amount": round(dc_amt, 2),
             "km_run": int(km_map.get(t.id, 0) or 0),
             "emp_present_count": int(present_map.get(t.id, 0) or 0),
+            "emp_wo_count": int(wo_map.get(t.id, 0) or 0),
+            "emp_absent_count": int(absent_map.get(t.id, 0) or 0),
+            "emp_leave_count": int(leave_map.get(t.id, 0) or 0),
         })
 
     if format.lower() == "pdf":

@@ -650,14 +650,19 @@ def build_squad_performance(from_date: date, to_date: date, circle: Optional[str
 
     op_ids = [op.id for op in ops]
     att_present_map = {}
+    att_wo_map = {}
     if op_ids:
         att_counts = (
-            db.query(Attendance.operation_id, func.count(Attendance.id))
-            .filter(Attendance.operation_id.in_(op_ids), Attendance.status == "P")
-            .group_by(Attendance.operation_id)
+            db.query(Attendance.operation_id, Attendance.status, func.count(Attendance.id))
+            .filter(Attendance.operation_id.in_(op_ids))
+            .group_by(Attendance.operation_id, Attendance.status)
             .all()
         )
-        att_present_map = {op_id: count for op_id, count in att_counts}
+        for op_id, status, count in att_counts:
+            if status == "P":
+                att_present_map[op_id] = count
+            elif status == "WO":
+                att_wo_map[op_id] = count
     rows = []
     for idx, t in enumerate(teams, start=1):
         latest_op = op_map.get(t.id)
@@ -682,10 +687,19 @@ def build_squad_performance(from_date: date, to_date: date, circle: Optional[str
         elif t.assigned_team_lead:
             operated_by_tl = strip_emp_code(t.assigned_team_lead)
 
-        # Form D Attendance
+        # Form D Attendance (Accounting for P and WO counts)
         total_ba = emp_counts.get(t.id, 0)
         present_ba = att_present_map.get(latest_op.id, 0) if latest_op else 0
-        form_d_display = f"{present_ba} / {total_ba}" if total_ba > 0 else "- / -"
+        wo_ba = att_wo_map.get(latest_op.id, 0) if latest_op else 0
+        if total_ba > 0:
+            if wo_ba == total_ba:
+                form_d_display = f"0 / {total_ba} (All WO)"
+            elif wo_ba > 0:
+                form_d_display = f"{present_ba} / {total_ba} (WO: {wo_ba})"
+            else:
+                form_d_display = f"{present_ba} / {total_ba}"
+        else:
+            form_d_display = "- / -"
 
         merged_info = ""
         if mode == "MERGED" and latest_op and latest_op.merged_with_team:
@@ -725,6 +739,9 @@ def build_squad_performance(from_date: date, to_date: date, circle: Optional[str
             "operation_mode": mode,
             "merged_status": merged_info,
             "form_d_attendance": form_d_display,
+            "form_d_present": present_ba,
+            "form_d_wo": wo_ba,
+            "total_ba": total_ba,
             "theft_cases": load_cases,
             "load_booked_kw": load_kw,
             "load_display": load_display,

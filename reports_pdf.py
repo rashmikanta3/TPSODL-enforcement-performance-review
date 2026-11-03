@@ -622,11 +622,12 @@ def build_team_performance_pdf(
         Paragraph("No. of<br/>DC", st['th']),
         Paragraph("KM Run", st['th']),
         Paragraph("Emp Present<br/>(Man-days)", st['th']),
+        Paragraph("Weekly Off<br/>(WO)", st['th']),
     ]
     data = [headers]
 
     tot_load = tot_amount = 0.0
-    tot_dc = tot_km = tot_emp = 0
+    tot_dc = tot_km = tot_emp = tot_wo = 0
 
     for idx, r in enumerate(performance_rows or [], start=1):
         load_val = float(_g(r, 'load_booked_kw', 'load_booked', default=0.0))
@@ -634,12 +635,14 @@ def build_team_performance_pdf(
         dc_val = int(_g(r, 'dc_count', 'number_of_dc', default=0))
         km_val = int(_g(r, 'km_run', 'total_km', default=0))
         emp_val = int(_g(r, 'emp_present_count', default=0))
+        wo_val = int(_g(r, 'emp_wo_count', default=0))
 
         tot_load += load_val
         tot_amount += amt_val
         tot_dc += dc_val
         tot_km += km_val
         tot_emp += emp_val
+        tot_wo += wo_val
 
         data.append([
             Paragraph(str(idx), st['cell_center']),
@@ -651,6 +654,7 @@ def build_team_performance_pdf(
             Paragraph(str(dc_val), st['cell_center']),
             Paragraph(str(km_val), st['cell_center']),
             Paragraph(str(emp_val), st['cell_bold_center']),
+            Paragraph(str(wo_val), st['cell_bold_center']),
         ])
 
     if not performance_rows:
@@ -664,6 +668,7 @@ def build_team_performance_pdf(
         Paragraph(str(tot_dc), st['cell_bold_center']),
         Paragraph(str(tot_km), st['cell_bold_center']),
         Paragraph(str(tot_emp), st['cell_bold_center']),
+        Paragraph(str(tot_wo), st['cell_bold_center']),
     ])
     last = len(data) - 1
 
@@ -674,7 +679,7 @@ def build_team_performance_pdf(
     if not performance_rows:
         cmds.append(('SPAN', (0, 1), (-1, 1)))
 
-    table = Table(data, colWidths=fit([30, 140, 135, 135, 80, 95, 55, 65, 75], usable), repeatRows=1)
+    table = Table(data, colWidths=fit([28, 125, 120, 120, 75, 90, 50, 60, 68, 68], usable), repeatRows=1)
     table.setStyle(TableStyle(cmds))
     story.append(table)
 

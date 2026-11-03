@@ -37,7 +37,7 @@
 <div class="row mb-3">
     <div class="col-12">
         <h4 class="fw-bold mb-1 text-dark">
-            <i class="fa-solid fa-bolt text-warning me-2"></i>⚡ Real-Time Load Booking Entry
+            <i class="fa-solid fa-bolt text-warning me-2"></i Real-Time Load Booking Entry
         </h4>
         <small class="text-muted">Enter Employee / Team Leader ID to resolve Circle and electrical hierarchy. Select Division, Subdivision, and Section.</small>
     </div>
@@ -71,7 +71,7 @@
                             TPSODL Team Leader Code / Officer ID <span class="text-danger">*</span>
                         </label>
                         <div class="input-group">
-                            <input type="text" id="lbEmpCode" class="form-control" placeholder="e.g. TL-101 or 522703" required autocomplete="off" onblur="if(this.value.trim() && this.value.trim() !== resolvedEmpCode) verifyEmployeeCode()">
+                            <input type="text" id="lbEmpCode" class="form-control" placeholder="e.g. 522703" required autocomplete="off" onblur="if(this.value.trim() && this.value.trim() !== resolvedEmpCode) verifyEmployeeCode()">
                             <button type="button" id="btnVerifyEmp" onclick="verifyEmployeeCode()" class="btn btn-primary px-3">
                                 <i class="fa-solid fa-circle-check me-1"></i> Verify Code
                             </button>
@@ -165,7 +165,7 @@
 
                     <!-- Action Button -->
                     <button type="submit" id="btnSaveLBk" class="btn btn-primary w-100 py-2 fw-semibold">
-                        <i class="fa-solid fa-floppy-disk me-1"></i> 💾 Submit Load Booking
+                        <i class="fa-solid fa-floppy-disk me-1"></i> Submit Load Booking
                     </button>
                 </form>
             </div>

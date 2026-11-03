@@ -267,8 +267,10 @@ def build_form_d_excel(
             else:
                 c.font = font_cell
 
-            # Sunday Shading
-            if col_idx in sunday_cols:
+            # Shading: Weekly Off ("WO") days or Sundays
+            if status == "WO":
+                c.fill = sunday_fill
+            elif col_idx in sunday_cols and status != "P":
                 c.fill = sunday_fill
             elif is_zebra:
                 c.fill = zebra_fill

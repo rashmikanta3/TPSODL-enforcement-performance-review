@@ -302,10 +302,18 @@ def save_daily_attendance(
 
     # Save BA squad members' attendance (TL does not punch in this portal)
     for item in req.attendance:
+        st = (item.status or "P").strip().upper()
+        if st == "-":
+            st = "WO"
+        if st not in ("P", "A", "L", "WO"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid attendance status '{item.status}'. Allowed options are P (Present), A (Absent), L (Leave), and WO (Weekly Off)."
+            )
         db.add(Attendance(
             operation_id=op.id,
             employee_id=item.employee_id,
-            status=item.status,
+            status=st,
             is_locked=True
         ))
 

@@ -116,21 +116,14 @@ async function onDateOrTeamChange() {
                     <td><strong class="text-primary">${m.emp_code}</strong></td>
                     <td class="fw-semibold">${m.name}</td>
                     <td><span class="badge bg-light text-dark border">${m.designation}</span></td>
-                    <td class="text-center">
+                    <td class="text-center" style="min-width: 180px;">
                         <input type="hidden" class="att-emp-id" value="${m.id}">
-                        <div class="btn-group btn-group-sm w-100" role="group">
-                            <input type="radio" class="btn-check" name="status_${m.id}" id="p_${m.id}" value="P" checked>
-                            <label class="btn btn-outline-success" for="p_${m.id}">P</label>
-
-                            <input type="radio" class="btn-check" name="status_${m.id}" id="a_${m.id}" value="A">
-                            <label class="btn btn-outline-danger" for="a_${m.id}">A</label>
-
-                            <input type="radio" class="btn-check" name="status_${m.id}" id="l_${m.id}" value="L">
-                            <label class="btn btn-outline-warning" for="l_${m.id}">L</label>
-
-                            <input type="radio" class="btn-check" name="status_${m.id}" id="wo_${m.id}" value="WO">
-                            <label class="btn btn-outline-secondary" for="wo_${m.id}">-</label>
-                        </div>
+                        <select class="form-select form-select-sm fw-semibold text-center att-status-select" name="status_${m.id}" id="status_${m.id}">
+                            <option value="P" selected>P (Present)</option>
+                            <option value="A">A (Absent)</option>
+                            <option value="L">L (Leave)</option>
+                            <option value="WO">WO (Weekly Off)</option>
+                        </select>
                     </td>
                 </tr>
             `).join('');
@@ -234,6 +227,10 @@ async function checkExistingDailyOperation(opDate, teamId) {
 
             if (data.attendance) {
                 Object.entries(data.attendance).forEach(([empId, status]) => {
+                    const sel = document.querySelector(`select[name="status_${empId}"]`);
+                    if (sel) {
+                        sel.value = status;
+                    }
                     const r = document.querySelector(`input[name="status_${empId}"][value="${status}"]`);
                     if (r) r.checked = true;
                 });
@@ -337,8 +334,15 @@ async function handleAttendanceSubmit(e) {
         const idInput = row.querySelector('.att-emp-id');
         if (idInput) {
             const empId = parseInt(idInput.value);
-            const checked = row.querySelector(`input[name="status_${empId}"]:checked`);
-            attList.push({ employee_id: empId, status: checked ? checked.value : 'P' });
+            const sel = row.querySelector(`select[name="status_${empId}"]`);
+            let statusVal = 'P';
+            if (sel) {
+                statusVal = sel.value;
+            } else {
+                const checked = row.querySelector(`input[name="status_${empId}"]:checked`);
+                if (checked) statusVal = checked.value;
+            }
+            attList.push({ employee_id: empId, status: statusVal });
         }
     });
 
@@ -394,3 +398,12 @@ async function toggleAttendanceLock(opId) {
     }
 }
 
+
+function markAllStatus(status) {
+    document.querySelectorAll('.att-status-select').forEach(sel => {
+        sel.value = status;
+    });
+    document.querySelectorAll(`input.btn-check[value="${status}"]`).forEach(r => {
+        r.checked = true;
+    });
+}

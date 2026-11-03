@@ -1,6 +1,6 @@
 from datetime import date
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # --- Auth Schemas ---
 class LoginRequest(BaseModel):
@@ -123,7 +123,19 @@ class VCRMasterCreate(BaseModel):
 # --- Attendance Schemas (Form D Register - BA Staff Only) ---
 class EmpAttendanceItem(BaseModel):
     employee_id: int
-    status: str = Field(..., description="P, A, L, WO, -")
+    status: str = Field("P", description="P, A, L, WO")
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def validate_status(cls, v):
+        if not v:
+            return "P"
+        v_clean = str(v).strip().upper()
+        if v_clean == "-":
+            return "WO"
+        if v_clean not in ("P", "A", "L", "WO"):
+            raise ValueError(f"Invalid attendance status '{v}'. Allowed options are P (Present), A (Absent), L (Leave), WO (Weekly Off).")
+        return v_clean
 
 class SaveOperationRequest(BaseModel):
     operation_date: date

@@ -128,26 +128,6 @@
                         </div>
                     </div>
 
-                    <!-- Bottom Squad Selector Toggle -->
-                    <div class="card p-3 mb-3 border bg-white">
-                        <div class="form-check form-switch mb-1">
-                            <input class="form-check-input" type="checkbox" id="dcSquadToggle" onchange="handleSquadToggle()">
-                            <label class="form-check-label fw-bold text-dark small" for="dcSquadToggle">
-                                <i class="fa-solid fa-users text-primary me-1"></i> Assign DC to Active Squad (Team Attribution)
-                            </label>
-                        </div>
-                        <small class="text-muted" style="font-size: 0.75rem;">
-                            When enabled, lets you manually attribute DC to an actively operating squad on this date (excludes non-operational squads). When off, defaults to DC officer's squad.
-                        </small>
-
-                        <div id="dcSquadSelectContainer" class="mt-2" style="display: none;">
-                            <label class="form-label small text-primary mb-1 fw-bold">Select Active Operational Squad</label>
-                            <select id="dcActiveSquadSelect" class="form-select form-select-sm">
-                                <option value="">-- Select Active Squad --</option>
-                            </select>
-                        </div>
-                    </div>
-
                     <div class="mb-4">
                         <label class="form-label small fw-bold">Remarks / Disconnection Notes</label>
                         <textarea id="dcRemarks" class="form-control form-control-sm" rows="2" placeholder="e.g. Line physically snapped, meter disconnected..."></textarea>
