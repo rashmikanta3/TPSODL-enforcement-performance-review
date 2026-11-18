@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 from auth import create_access_token, get_current_actor
-from typing import Optional
+from config import settings
 
 router = APIRouter()
 
@@ -16,6 +16,10 @@ class ChangePasswordRequest(BaseModel):
     username: str
     old_password: str
     new_password: str
+
+# Session cookie: not readable by JS (no frontend code reads document.cookie), HTTPS-only,
+# not sent on cross-site POSTs, and expires together with the JWT inside it.
+COOKIE_OPTS = dict(httponly=True, secure=True, samesite="lax", path="/")
 
 @router.post("/login")
 def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
@@ -32,7 +36,12 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         "circle": user.circle or "",
         "team_id": user.team_id
     })
-    response.set_cookie(key="access_token", value=f"Bearer {token}", httponly=False)
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {token}",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        **COOKIE_OPTS,
+    )
 
     return {
         "success": True,
@@ -45,10 +54,14 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         "can_edit": user.can_edit
     }
 
+@router.post("/logout")
+def logout(response: Response):
+    """Clears the session cookie (JS cannot clear it because it is HttpOnly)."""
+    response.delete_cookie(key="access_token", **COOKIE_OPTS)
+    return {"success": True}
+
 @router.get("/me")
-def get_me(current_user: Optional[User] = Depends(get_current_actor)):
-    if not current_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+def get_me(current_user: User = Depends(get_current_actor)):
     return {
         "id": current_user.id,
         "username": current_user.username,
@@ -61,8 +74,15 @@ def get_me(current_user: Optional[User] = Depends(get_current_actor)):
     }
 
 @router.post("/change-password")
-def change_password(req: ChangePasswordRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == req.username).first()
+def change_password(
+    req: ChangePasswordRequest,
+    current_user: User = Depends(get_current_actor),
+    db: Session = Depends(get_db)
+):
+    # A logged-in user may only change their own password.
+    if req.username.strip() != current_user.username:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only change your own password")
+    user = db.query(User).filter(User.id == current_user.id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     

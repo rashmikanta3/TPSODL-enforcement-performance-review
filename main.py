@@ -93,11 +93,8 @@ def dc_page(request: Request):
 
 
 def check_page_access(request: Request, db: Session, allowed_roles: list[str]):
-    """Redirects users whose role is not in allowed_roles (e.g. USER on VCR/Collection) to dashboard."""
-    role_hdr = request.headers.get("x-user-role")
-    if role_hdr and role_hdr.strip().upper() not in allowed_roles:
-        return RedirectResponse(url="/dashboard?error=access_denied", status_code=303)
-
+    """Redirects users whose role is not in allowed_roles (e.g. USER on VCR/Collection) to dashboard.
+    Only the signed JWT (and the user row it points to) is trusted; identity headers are ignored."""
     token = None
     auth_header = request.headers.get("authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -109,9 +106,6 @@ def check_page_access(request: Request, db: Session, allowed_roles: list[str]):
     if token:
         payload = decode_token(token)
         if payload:
-            role = payload.get("role")
-            if role and role.strip().upper() not in allowed_roles:
-                return RedirectResponse(url="/dashboard?error=access_denied", status_code=303)
             sub = payload.get("sub")
             if sub:
                 user = db.query(User).filter(User.username == sub, User.is_active == True).first()

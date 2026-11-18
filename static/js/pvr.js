@@ -14,15 +14,9 @@ function escHtml(str) {
 }
 
 function authHeaders() {
-    const user = getCurrentUser();
-    if (!user) return {};
-    return {
-        'x-username': user.username || '',
-        'x-user-role': user.role || '',
-        'x-user-circle': user.circle || '',
-        'x-user-team-id': user.team_id ? String(user.team_id) : '',
-        'x-user-can-edit': user.can_edit ? 'true' : 'false',
-    };
+    // Authentication uses the HttpOnly access_token cookie, which the browser sends automatically.
+    // Identity headers (x-username / x-user-role ...) are no longer trusted by the server.
+    return {};
 }
 
 function authHeadersJson() {

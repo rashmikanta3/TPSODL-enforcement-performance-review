@@ -138,6 +138,7 @@ const OPERATIONAL_ROUTES = [
     '/dc',
     '/collection',
     '/pvr',
+    '/reports',
     '/vcr-desk',
     '/vcr',
     '/admin-desk',
@@ -282,11 +283,46 @@ function applyViewOnlyRestrictions() {
     }
 }
 
-function logout() {
+async function logout() {
+    try {
+        // The session cookie is HttpOnly, so only the server can clear it.
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) { /* still clear the local session below */ }
     localStorage.removeItem('tpsodl_user');
     sessionStorage.removeItem('redirect_after_login');
     window.location.href = '/dashboard';
 }
+
+// If the server says the session is gone (expired / logged out / browser restarted),
+// clear the stale local profile and send the user to login instead of failing silently.
+let _sessionExpiredHandled = false;
+function handleSessionExpired() {
+    if (_sessionExpiredHandled) return;
+    _sessionExpiredHandled = true;
+    localStorage.removeItem('tpsodl_user');
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/' || path === '/dashboard' || path === '/login') {
+        updateNavUser();
+        return;
+    }
+    sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search);
+    window.location.href = `/login?msg=auth_required&next=${encodeURIComponent(window.location.pathname)}`;
+}
+
+(function installAuthFetchGuard() {
+    if (!window.fetch) return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function(input, init) {
+        const res = await originalFetch(input, init);
+        try {
+            const url = typeof input === 'string' ? input : ((input && input.url) || '');
+            if (res.status === 401 && url.includes('/api/') && !url.includes('/api/auth/login')) {
+                handleSessionExpired();
+            }
+        } catch (e) { /* never break the caller */ }
+        return res;
+    };
+})();
 
 
 

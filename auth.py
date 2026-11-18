@@ -80,41 +80,34 @@ def require_roles(allowed_roles: List[str]):
     return role_checker
 
 def get_current_actor(
-    request: Request,
     token_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db)
-) -> Optional[User]:
+) -> User:
     """
-    Extracts the current user/actor from JWT token, cookie, or API headers.
-    Provides robust authentication across browser session and client requests.
+    Returns the logged-in user from a valid JWT (Authorization: Bearer header or the
+    access_token cookie). Identity headers such as x-username / x-user-role are NOT
+    trusted. Anonymous requests are rejected with 401.
     """
-    if token_user:
-        return token_user
-
-    username = request.headers.get("x-username")
-    if username:
-        user = db.query(User).filter(User.username == username.strip(), User.is_active == True).first()
-        if user:
-            return user
-
-    role = request.headers.get("x-user-role")
-    circle = request.headers.get("x-user-circle")
-    team_id_hdr = request.headers.get("x-user-team-id")
-    team_id_val = int(team_id_hdr) if team_id_hdr and team_id_hdr.strip().isdigit() else None
-    if role:
-        can_edit_header = request.headers.get("x-user-can-edit", "true").lower() in ("true", "1", "yes")
-        u = User(
-            id=0,
-            username=username or "api_user",
-            role=role.strip().upper(),
-            circle=circle or "",
-            team_id=team_id_val,
-            can_edit=can_edit_header,
-            is_active=True
+    if not token_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        return u
+    return token_user
 
-    return None
+
+def expand_circles(circles) -> list[str]:
+    """Upper-cases circles and treats CITY / BERHAMPUR CITY as the same circle."""
+    out = []
+    for c in circles or []:
+        c_up = (c or "").strip().upper()
+        if not c_up:
+            continue
+        group = ["CITY", "BERHAMPUR CITY"] if c_up in ("CITY", "BERHAMPUR CITY") else [c_up]
+        for g in group:
+            if g not in out:
+                out.append(g)
+    return out
 
 def verify_write_permission(user: Optional[User], circle: Optional[str] = None):
     """
