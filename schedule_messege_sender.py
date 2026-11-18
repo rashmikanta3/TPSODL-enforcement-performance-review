@@ -578,8 +578,9 @@ def _gateway(method: str, path: str, payload: dict | None = None, timeout: int =
 
 def gateway_connected() -> bool:
     try:
-        return bool(_gateway("GET", "/health", timeout=10).get("connected"))
-    except RuntimeError:
+        health = _gateway("GET", "/health", timeout=10)
+        return bool(health.get("connected")) if isinstance(health, dict) else False
+    except Exception:  # non-JSON reply, socket error, etc. must never crash the scheduler loop
         return False
 
 
