@@ -10,7 +10,8 @@ from sqlalchemy import func, or_
 from database import get_db
 from models import LoadBooking, DailyTeamOperation, TeamLead, Employee, Team, VCRMaster, User, get_assigned_circles, is_circle_authorized
 from schemas import LoadBookingRequest
-from auth import get_current_actor, verify_write_permission
+from auth import get_current_actor, verify_write_permission, verify_team_permission
+from config import today_ist
 
 router = APIRouter()
 
@@ -244,14 +245,10 @@ def punch_load_booking(
     if circle_clean == "CITY":
         circle_clean = "BERHAMPUR CITY"
 
-    if current_user:
-        verify_write_permission(current_user, circle_clean)
-        if current_user.role == "USER":
-            if req.team_id and current_user.team_id and req.team_id != current_user.team_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Access Denied: You cannot submit bookings for another squad (Team ID: {req.team_id})."
-                )
+    verify_write_permission(current_user, circle_clean)
+    if current_user.role == "USER":
+        # USER must belong to a squad and may only submit for it
+        verify_team_permission(current_user, req.team_id)
 
     # Enforce duplicate check: (circle, book_number, page_no)
     existing_page = db.query(LoadBooking).filter(
@@ -266,7 +263,7 @@ def punch_load_booking(
             detail=f"Duplicate Page Number! Page '{page_no}' in Book '{book_number}' has already been booked in Circle '{circle_clean}'."
         )
 
-    booking_date = req.booking_date or date.today()
+    booking_date = req.booking_date or today_ist()
     tl_code = (req.tl_code or req.punch_emp_code or "").strip()
 
     # DYNAMIC SQUAD PERFORMANCE ATTRIBUTION:
@@ -307,7 +304,7 @@ def punch_load_booking(
             assigned_team_id = tm.id
 
     # Squad user isolation: enforce current_user.team_id
-    if current_user and current_user.role == "USER" and current_user.team_id:
+    if current_user.role == "USER" and current_user.team_id:
         assigned_team_id = current_user.team_id
 
     if assigned_team_id:
@@ -585,7 +582,7 @@ def export_load_bookings_excel(
     wb.save(stream)
     stream.seek(0)
 
-    filename = f"Load_Bookings_{date.today().isoformat()}.xlsx"
+    filename = f"Load_Bookings_{today_ist().isoformat()}.xlsx"
     return Response(
         content=stream.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

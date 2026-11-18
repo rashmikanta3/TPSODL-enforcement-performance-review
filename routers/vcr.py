@@ -243,6 +243,7 @@ async def bulk_upload_vcr_excel(
 def check_vcr_exists(
     vcr_number: str = Query(...),
     form_type: str = Query("dc"),
+    _user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
     """

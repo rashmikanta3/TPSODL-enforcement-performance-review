@@ -5,9 +5,18 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Team, TeamLead, Employee, DailyTeamOperation, Attendance, User, get_assigned_circles, is_circle_authorized
 from schemas import SaveOperationRequest
-from auth import get_current_actor, verify_write_permission
+from auth import get_current_actor, verify_write_permission, verify_team_permission
 
 router = APIRouter()
+
+
+def _authorize_team_read(user: User, team_id: int, db: Session):
+    """USER: own squad only. SUB_ADMIN: squads in assigned circles. ADMIN: any."""
+    verify_team_permission(user, team_id)
+    if user.role == "SUB_ADMIN":
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if team and not is_circle_authorized(user, team.circle):
+            raise HTTPException(status_code=403, detail="Forbidden: You are not authorized for this squad's circle.")
 
 @router.get("/teams-by-circle/{circle}")
 def get_teams_by_circle(
@@ -83,8 +92,9 @@ def get_tls_by_circle(
     ]
 
 @router.get("/team-members/{team_id}")
-def get_team_members(team_id: int, db: Session = Depends(get_db)):
+def get_team_members(team_id: int, current_user: User = Depends(get_current_actor), db: Session = Depends(get_db)):
     """Returns BA contractor employees assigned to this squad."""
+    _authorize_team_read(current_user, team_id, db)
     emps = db.query(Employee).filter(
         Employee.team_id == team_id,
         Employee.is_active == True
@@ -102,7 +112,8 @@ def get_team_members(team_id: int, db: Session = Depends(get_db)):
     ]
 
 @router.get("/status")
-def get_daily_status(operation_date: date, team_id: int, db: Session = Depends(get_db)):
+def get_daily_status(operation_date: date, team_id: int, current_user: User = Depends(get_current_actor), db: Session = Depends(get_db)):
+    _authorize_team_read(current_user, team_id, db)
     op = db.query(DailyTeamOperation).filter(
         DailyTeamOperation.operation_date == operation_date,
         DailyTeamOperation.team_id == team_id
@@ -215,15 +226,27 @@ def save_daily_attendance(
     db: Session = Depends(get_db)
 ):
     team = db.query(Team).filter(Team.id == req.team_id).first()
-    target_circle = req.circle or (team.circle if team else None)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    # Authorize against the squad's real circle, never the client-supplied one.
+    target_circle = team.circle
 
-    if current_user:
-        verify_write_permission(current_user, target_circle)
-        if current_user.role == "USER":
-            if not current_user.team_id or current_user.team_id != req.team_id:
+    verify_write_permission(current_user, target_circle)
+    if current_user.role == "USER":
+        if not current_user.team_id or current_user.team_id != req.team_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access Denied: You are only authorized to submit attendance for your assigned squad (Team ID: {current_user.team_id})."
+            )
+        emp_ids = {item.employee_id for item in req.attendance}
+        if emp_ids:
+            own_ids = {eid for (eid,) in db.query(Employee.id).filter(
+                Employee.id.in_(emp_ids), Employee.team_id == req.team_id
+            ).all()}
+            if emp_ids - own_ids:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Access Denied: You are only authorized to submit attendance for your assigned squad (Team ID: {current_user.team_id})."
+                    detail="Access Denied: Attendance can only be marked for members of your own squad."
                 )
 
     # Determine mode based on inputs & team vehicle configuration
@@ -268,7 +291,7 @@ def save_daily_attendance(
     ).first()
 
     if op and getattr(op, "is_locked", False):
-        if current_user and current_user.role == "USER":
+        if current_user.role == "USER":
             raise HTTPException(
                 status_code=403,
                 detail="This record is locked after submission. Contact your Circle Admin or MIS In-Charge to make corrections."

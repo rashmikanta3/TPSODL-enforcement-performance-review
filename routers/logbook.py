@@ -6,7 +6,7 @@ from sqlalchemy import func
 from database import get_db
 from models import VehicleLogBook, Team, User, get_assigned_circles, is_circle_authorized
 from schemas import LogBookEntry
-from auth import get_current_actor, verify_write_permission
+from auth import get_current_actor, verify_write_permission, expand_circles
 
 router = APIRouter()
 
@@ -72,18 +72,19 @@ def get_eligible_logbook_teams(
         Team.has_vehicle == True,
         Team.is_office_team == False
     )
-    if current_user and current_user.role == "USER":
+    if current_user.role == "USER":
         if current_user.team_id:
             q = q.filter(Team.id == current_user.team_id)
         else:
             q = q.filter(Team.id == -1)
-    elif circle:
-        c_up = circle.strip().upper()
-        if c_up in ("CITY", "BERHAMPUR CITY"):
-            q = q.filter(Team.circle.in_(["CITY", "BERHAMPUR CITY"]))
-        else:
-            q = q.filter(Team.circle == c_up)
-            
+    else:
+        if current_user.role == "SUB_ADMIN":
+            if circle and not is_circle_authorized(current_user, circle.strip().upper()):
+                raise HTTPException(status_code=403, detail=f"Unauthorized: You do not have permissions for circle: {circle}")
+            q = q.filter(Team.circle.in_(expand_circles(get_assigned_circles(current_user))))
+        if circle:
+            q = q.filter(Team.circle.in_(expand_circles([circle])))
+
     teams = q.order_by(Team.name.asc()).all()
     return [{
         "id": t.id,

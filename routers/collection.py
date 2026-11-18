@@ -9,8 +9,15 @@ import openpyxl
 from database import get_db
 from models import Collection, Team, User, get_assigned_circles, is_circle_authorized
 from auth import get_current_actor, verify_write_permission
+from config import today_ist
 
 router = APIRouter()
+
+
+def _deny_squad_user(user: User):
+    """Collection register is restricted to ADMIN / SUB_ADMIN (same as the /collection page)."""
+    if user.role not in ("ADMIN", "SUB_ADMIN"):
+        raise HTTPException(status_code=403, detail="Access Denied: Collection data is restricted to Admins and Circle Sub-Admins.")
 
 @router.get("/stats")
 def get_collection_stats(
@@ -26,6 +33,7 @@ def get_collection_stats(
     - Total Money Receipts (MR Count)
     Scopes query to authorized circles for Sub-Admin.
     """
+    _deny_squad_user(current_user)
     q = db.query(
         func.coalesce(func.sum(Collection.amount_paid), 0.0).label("total_amt"),
         func.count(Collection.id).label("total_cnt")
@@ -183,7 +191,7 @@ async def upload_collection_excel(
             elif p_date_raw:
                 p_date = datetime.strptime(str(p_date_raw).strip()[:10], "%Y-%m-%d").date()
             else:
-                p_date = date.today()
+                p_date = today_ist()
 
             div_raw = get_val(row, "division", 1)
             div = str(div_raw).strip() if div_raw else None
@@ -262,7 +270,7 @@ def download_sample_template():
     ])
     ws.append([
         "JEYPORE", "JED (Jeypore Electric Division)", "Jeypore Town Sub-Division", "Parabeda Section",
-        "MR-100235", "2026-11-01", 22500.0,
+        "MR-100235", "VCR-2026-002", "2026-11-01", 22500.0,
         "A. K. Tripathy", "SQUAD JEYPORE-1"
     ])
     buf = io.BytesIO()
@@ -281,8 +289,9 @@ def list_collections(
     current_user: Optional[User] = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
+    _deny_squad_user(current_user)
     q = db.query(Collection)
-    if current_user and current_user.role == "SUB_ADMIN":
+    if current_user.role == "SUB_ADMIN":
         allowed = get_assigned_circles(current_user)
         expanded = list(allowed)
         if "BERHAMPUR CITY" in allowed and "CITY" not in expanded:

@@ -19,18 +19,9 @@ from schemas import (
     VCRMasterCreate
 )
 
-def require_admin_role(
-    request: Request,
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    """Enforces strict ADMIN role access. Sub-Admins and Users are rejected with 403 Forbidden."""
-    if current_user and current_user.role != "ADMIN":
-        raise HTTPException(
-            status_code=403,
-            detail="Forbidden: Master Administration is restricted strictly to ADMIN users."
-        )
-    role_header = request.headers.get("x-user-role")
-    if role_header and role_header.strip().upper() != "ADMIN":
+def require_admin_role(current_user: User = Depends(get_current_actor)):
+    """Enforces strict ADMIN role access. Anonymous -> 401; Sub-Admins and Users -> 403."""
+    if current_user.role != "ADMIN":
         raise HTTPException(
             status_code=403,
             detail="Forbidden: Master Administration is restricted strictly to ADMIN users."
@@ -245,7 +236,7 @@ def create_team_lead(req: CreateTeamLeadRequest, _admin: bool = Depends(require_
     }
 
 @router.get("/team-leads/lookup")
-def lookup_team_lead(code: str = Query(...), db: Session = Depends(get_db)):
+def lookup_team_lead(code: str = Query(...), _user: User = Depends(get_current_actor), db: Session = Depends(get_db)):
     """
     Look up Team Leader by employee code (tl_code) or partial name.
     """
@@ -280,7 +271,7 @@ def lookup_team_lead(code: str = Query(...), db: Session = Depends(get_db)):
 
 @router.get("/team-leads/all")
 @router.get("/team-leads")
-def list_team_leads(circle: Optional[str] = None, active_only: bool = False, db: Session = Depends(get_db)):
+def list_team_leads(circle: Optional[str] = None, active_only: bool = False, _user: User = Depends(get_current_actor), db: Session = Depends(get_db)):
     """Returns all TPSODL regular officers designated as Team Leaders."""
     q = db.query(TeamLead)
     if active_only:
@@ -395,7 +386,7 @@ def create_employee(req: CreateEmployeeRequest, _admin: bool = Depends(require_a
 
 @router.get("/employees/all")
 @router.get("/employees")
-def list_employees(circle: Optional[str] = None, team_id: Optional[int] = None, active_only: bool = False, db: Session = Depends(get_db)):
+def list_employees(circle: Optional[str] = None, team_id: Optional[int] = None, active_only: bool = False, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     """Returns all BA contractor personnel with assigned squad name and circle."""
     q = db.query(Employee)
     if active_only:
@@ -606,7 +597,7 @@ def create_vcr(req: VCRMasterCreate, _admin: bool = Depends(require_admin_role),
     return {"success": True, "id": vcr.id, "message": f"VCR '{vcr.vcr_number}' registered"}
 
 @router.get("/vcr")
-def list_vcrs(circle: Optional[str] = None, limit: int = 50, db: Session = Depends(get_db)):
+def list_vcrs(circle: Optional[str] = None, limit: int = 50, _admin: bool = Depends(require_admin_role), db: Session = Depends(get_db)):
     q = db.query(VCRMaster)
     if circle:
         q = q.filter(VCRMaster.circle == circle.strip().upper())

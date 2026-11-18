@@ -10,6 +10,9 @@ from models import (
     Employee, TeamLead, DailyTeamOperation, Attendance, Team,
     VehicleLogBook, LoadBooking, DisconnectionRecord, Collection
 )
+from models import User, get_assigned_circles, is_circle_authorized
+from auth import get_current_actor, verify_team_permission, expand_circles
+from config import today_ist
 import reports_excel
 import reports_pdf
 
@@ -23,22 +26,49 @@ def _month_range(year: int, month: int):
     return date(year, month, 1), date(year, month, last_day)
 
 
+def _authorize_circle(user: User, circle_up: str) -> list[str]:
+    """403 unless the user may read this circle. Returns its DB values (CITY == BERHAMPUR CITY)."""
+    if user.role != "ADMIN" and not is_circle_authorized(user, circle_up):
+        raise HTTPException(status_code=403, detail=f"Unauthorized: You do not have permissions for circle: {circle_up}")
+    return expand_circles([circle_up])
+
+
+def _authorize_team(user: User, team_id: Optional[int], db: Session) -> Optional[int]:
+    """USER: forced to own squad. Others: the squad must be in an authorized circle."""
+    if user.role == "USER":
+        verify_team_permission(user, team_id)
+        return user.team_id
+    if team_id and user.role != "ADMIN":
+        t = db.query(Team).filter(Team.id == team_id).first()
+        if t and not is_circle_authorized(user, t.circle):
+            raise HTTPException(status_code=403, detail="Unauthorized: Squad belongs to a circle you are not authorized for.")
+    return team_id
+
+
+def _deny_squad_user(user: User):
+    if user.role == "USER":
+        raise HTTPException(status_code=403, detail="Access Denied: Circle-wide registers are restricted to Admins and Circle Sub-Admins.")
+
+
 # =========================================================================
 # 1. FORM D ATTENDANCE REGISTER  (employees listed team-wise, sorted)
 # =========================================================================
 @router.get("/form-d")
 def export_form_d(
     circle_name: str,
-    year: int = Query(default_factory=lambda: date.today().year),
-    month: int = Query(default_factory=lambda: date.today().month),
+    year: int = Query(default_factory=lambda: today_ist().year),
+    month: int = Query(default_factory=lambda: today_ist().month, ge=1, le=12),
     format: str = Query("excel", description="excel or pdf"),
     team_id: Optional[int] = None,
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
     circle_up = circle_name.strip().upper()
+    circle_vals = _authorize_circle(current_user, circle_up)
+    team_id = _authorize_team(current_user, team_id, db)
     emp_q = db.query(Employee, Team.name.label("team_name"))\
         .outerjoin(Team, Employee.team_id == Team.id)\
-        .filter(Employee.circle == circle_up, Employee.is_active == True)
+        .filter(Employee.circle.in_(circle_vals), Employee.is_active == True)
     team_name = None
     team_lead = None
     if team_id:
@@ -120,13 +150,16 @@ def export_form_d(
 @router.get("/vehicle-log")
 def export_vehicle_log(
     circle_name: str,
-    year: int = Query(default_factory=lambda: date.today().year),
-    month: int = Query(default_factory=lambda: date.today().month),
+    year: int = Query(default_factory=lambda: today_ist().year),
+    month: int = Query(default_factory=lambda: today_ist().month, ge=1, le=12),
     format: str = Query("excel", description="excel or pdf"),
     team_id: Optional[int] = None,
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
     circle_up = circle_name.strip().upper()
+    circle_vals = _authorize_circle(current_user, circle_up)
+    team_id = _authorize_team(current_user, team_id, db)
 
     if team_id:
         t = db.query(Team).filter(Team.id == team_id).first()
@@ -176,7 +209,7 @@ def export_vehicle_log(
             return Response(content=file_bytes, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=Vehicle_Log_{t.name}_{month}_{year}.xlsx"})
 
     # Circle-wide vehicle log summary
-    teams = db.query(Team).filter(Team.circle == circle_up, Team.is_active == True).all()
+    teams = db.query(Team).filter(Team.circle.in_(circle_vals), Team.is_active == True).all()
     rows = []
     grand_total_km = 0
 
@@ -231,20 +264,23 @@ def export_vehicle_log(
 @router.get("/squad-performance")
 def export_squad_performance(
     circle_name: str,
-    year: int = Query(default_factory=lambda: date.today().year),
-    month: int = Query(default_factory=lambda: date.today().month),
+    year: int = Query(default_factory=lambda: today_ist().year),
+    month: int = Query(default_factory=lambda: today_ist().month, ge=1, le=12),
     format: str = Query("excel", description="excel or pdf"),
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
+    _deny_squad_user(current_user)
     circle_up = circle_name.strip().upper()
-    teams = db.query(Team).filter(Team.circle == circle_up, Team.is_active == True).order_by(Team.name).all()
+    circle_vals = _authorize_circle(current_user, circle_up)
+    teams = db.query(Team).filter(Team.circle.in_(circle_vals), Team.is_active == True).order_by(Team.name).all()
 
     # Load Bookings by team
     lb_map = dict(db.query(
         LoadBooking.team_id,
         func.coalesce(func.sum(LoadBooking.booked_load), 0.0)
     ).filter(
-        LoadBooking.circle == circle_up,
+        LoadBooking.circle.in_(circle_vals),
         extract('year', LoadBooking.booking_date) == year,
         extract('month', LoadBooking.booking_date) == month
     ).group_by(LoadBooking.team_id).all())
@@ -254,7 +290,7 @@ def export_squad_performance(
         Collection.team_name,
         func.coalesce(func.sum(Collection.amount_paid), 0.0)
     ).filter(
-        Collection.circle == circle_up,
+        Collection.circle.in_(circle_vals),
         extract('year', Collection.payment_date) == year,
         extract('month', Collection.payment_date) == month
     ).group_by(Collection.team_name).all())
@@ -289,7 +325,7 @@ def export_squad_performance(
     ).join(Employee, Attendance.employee_id == Employee.id)\
      .join(DailyTeamOperation, Attendance.operation_id == DailyTeamOperation.id)\
      .filter(
-        Employee.circle == circle_up,
+        Employee.circle.in_(circle_vals),
         extract('year', DailyTeamOperation.operation_date) == year,
         extract('month', DailyTeamOperation.operation_date) == month
     ).group_by(Employee.team_id, Attendance.status).all()
@@ -350,14 +386,17 @@ def export_squad_performance(
 @router.get("/collection")
 def export_collection(
     circle_name: str,
-    year: int = Query(default_factory=lambda: date.today().year),
-    month: int = Query(default_factory=lambda: date.today().month),
+    year: int = Query(default_factory=lambda: today_ist().year),
+    month: int = Query(default_factory=lambda: today_ist().month, ge=1, le=12),
     format: str = Query("excel", description="excel or pdf"),
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
+    _deny_squad_user(current_user)
     circle_up = circle_name.strip().upper()
+    circle_vals = _authorize_circle(current_user, circle_up)
     collections = db.query(Collection).filter(
-        Collection.circle == circle_up,
+        Collection.circle.in_(circle_vals),
         extract('year', Collection.payment_date) == year,
         extract('month', Collection.payment_date) == month
     ).order_by(Collection.payment_date, Collection.id).all()
@@ -398,7 +437,7 @@ def export_collection(
 #    Pass year & month (defaults to current month). from_date / to_date, if
 #    given, override the month and export that exact range instead.
 # =========================================================================
-def _load_booking_entries(db: Session, circle, year, month, from_date, to_date):
+def _load_booking_entries(db: Session, user: User, circle, year, month, from_date, to_date):
     q = db.query(
         LoadBooking,
         TeamLead.name.label("tl_name"),
@@ -408,10 +447,15 @@ def _load_booking_entries(db: Session, circle, year, month, from_date, to_date):
     .outerjoin(Team, LoadBooking.team_id == Team.id)
 
     if circle and circle.strip().upper() not in ("ALL", ""):
-        c_clean = circle.strip().upper()
-        if c_clean == "CITY":
-            c_clean = "BERHAMPUR CITY"
-        q = q.filter(LoadBooking.circle == c_clean)
+        q = q.filter(LoadBooking.circle.in_(_authorize_circle(user, circle.strip().upper())))
+    elif user.role != "ADMIN":
+        q = q.filter(LoadBooking.circle.in_(expand_circles(get_assigned_circles(user))))
+
+    if user.role == "USER":
+        q = q.filter(LoadBooking.team_id == (user.team_id or -1))
+
+    if month is not None and not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="month must be between 1 and 12")
 
     if from_date or to_date:
         if from_date:
@@ -420,8 +464,8 @@ def _load_booking_entries(db: Session, circle, year, month, from_date, to_date):
             q = q.filter(LoadBooking.booking_date <= to_date)
         period_label = None
     else:
-        year = year or date.today().year
-        month = month or date.today().month
+        year = year or today_ist().year
+        month = month or today_ist().month
         m_start, m_end = _month_range(year, month)
         q = q.filter(LoadBooking.booking_date >= m_start, LoadBooking.booking_date <= m_end)
         period_label = f"{calendar.month_name[month].upper()} {year}"
@@ -450,7 +494,7 @@ def _load_booking_entries(db: Session, circle, year, month, from_date, to_date):
 
 
 def _lb_filename(circle, period_label, ext):
-    tag = (period_label or str(date.today())).replace(" ", "_")
+    tag = (period_label or str(today_ist())).replace(" ", "_")
     return f"Load_Bookings_{(circle or 'ALL').upper()}_{tag}.{ext}"
 
 
@@ -461,10 +505,11 @@ def export_load_bookings_excel(
     month: Optional[int] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
     """Exports every load booking entry of the month to a protected Excel (.xlsx) register."""
-    bookings, period_label = _load_booking_entries(db, circle, year, month, from_date, to_date)
+    bookings, period_label = _load_booking_entries(db, current_user, circle, year, month, from_date, to_date)
     file_bytes = reports_excel.build_load_booking_excel(
         bookings=bookings,
         circle=circle,
@@ -486,10 +531,11 @@ def export_load_bookings_pdf(
     month: Optional[int] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
+    current_user: User = Depends(get_current_actor),
     db: Session = Depends(get_db)
 ):
     """Exports every load booking entry of the month to an A4 landscape PDF register."""
-    bookings, period_label = _load_booking_entries(db, circle, year, month, from_date, to_date)
+    bookings, period_label = _load_booking_entries(db, current_user, circle, year, month, from_date, to_date)
     file_bytes = reports_pdf.build_load_booking_pdf(
         bookings=bookings,
         circle=circle,

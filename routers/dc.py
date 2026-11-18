@@ -10,7 +10,7 @@ from sqlalchemy import func
 from database import get_db
 from models import DisconnectionRecord, VCRMaster, TeamLead, Employee, DailyTeamOperation, Team, User, get_assigned_circles, is_circle_authorized
 from schemas import DCPunchRequest
-from auth import get_current_actor, verify_write_permission
+from auth import get_current_actor, verify_write_permission, verify_team_permission, expand_circles
 
 router = APIRouter()
 
@@ -29,7 +29,7 @@ def lookup_vcr(
     if not v:
         raise HTTPException(status_code=404, detail=f"VCR Number '{vcr_number}' not found in VCR Master")
 
-    if current_user and current_user.role == "SUB_ADMIN":
+    if current_user.role != "ADMIN":
         if not is_circle_authorized(current_user, v.circle):
             raise HTTPException(
                 status_code=403,
@@ -57,14 +57,14 @@ def punch_dc(
     if not vcr:
         raise HTTPException(status_code=404, detail=f"VCR '{req.vcr_number}' is not registered in VCR Master")
 
-    if current_user:
-        verify_write_permission(current_user, vcr.circle)
-        if current_user.role == "USER":
-            if req.team_id and current_user.team_id and req.team_id != current_user.team_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Access Denied: You cannot submit DC records for another squad (Team ID: {req.team_id})."
-                )
+    verify_write_permission(current_user, vcr.circle)
+    if current_user.role == "USER":
+        # USER must belong to a squad and may only submit for it
+        verify_team_permission(current_user, req.team_id)
+    elif current_user.role == "SUB_ADMIN" and req.team_id:
+        req_team = db.query(Team).filter(Team.id == req.team_id).first()
+        if req_team and not is_circle_authorized(current_user, req_team.circle):
+            raise HTTPException(status_code=403, detail="Forbidden: Selected squad belongs to a circle you are not authorized for.")
 
     tl_code = (req.dc_authority_tl_code or req.dc_authority_emp_id or "").strip()
     if not tl_code:
@@ -100,7 +100,7 @@ def punch_dc(
     if not final_team_id:
         # Fallback to first active field team in mapped circle
         fallback_team = db.query(Team).filter(
-            Team.circle == vcr.circle,
+            Team.circle.in_(expand_circles([vcr.circle])),
             Team.is_active == True,
             Team.has_vehicle == True,
             Team.is_office_team == False
@@ -108,7 +108,7 @@ def punch_dc(
         final_team_id = fallback_team.id if fallback_team else None
 
     # Squad user isolation: enforce current_user.team_id
-    if current_user and current_user.role == "USER" and current_user.team_id:
+    if current_user.role == "USER" and current_user.team_id:
         final_team_id = current_user.team_id
 
     if not final_team_id:

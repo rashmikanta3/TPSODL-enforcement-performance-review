@@ -101,12 +101,14 @@ async def upload_pvr(
     if not tl:
         raise HTTPException(400, f"Team Leader not found: {tl_code}")
 
-    # Circle authorisation
+    # Circle authorisation (both the submitted circle and the TL's own circle)
     if not is_circle_authorized(current_user, circle):
         raise HTTPException(403, f"Not authorized for circle: {circle}")
+    if not is_circle_authorized(current_user, tl.circle):
+        raise HTTPException(403, f"Team Leader {tl.tl_code} belongs to circle {tl.circle}, which you are not authorized for")
 
-    # Read and validate PDF
-    pdf_bytes = await file.read()
+    # Read and validate PDF (read at most limit+1 bytes so oversized uploads are not buffered whole)
+    pdf_bytes = await file.read(PVR_MAX_BYTES + 1)
     if not pdf_bytes:
         raise HTTPException(400, "Uploaded file is empty")
     if len(pdf_bytes) > PVR_MAX_BYTES:
@@ -151,7 +153,7 @@ async def upload_pvr(
         existing.circle = circle.strip().upper()
         existing.r2_key = r2_key
         existing.file_size_bytes = len(pdf_bytes)
-        existing.uploaded_by = current_user.username if current_user else "system"
+        existing.uploaded_by = current_user.username
         existing.uploaded_at = now_utc
         existing.ai_status = "PENDING"
         existing.ai_score = None
@@ -168,7 +170,7 @@ async def upload_pvr(
             report_date=r_date,
             r2_key=r2_key,
             file_size_bytes=len(pdf_bytes),
-            uploaded_by=current_user.username if current_user else "system",
+            uploaded_by=current_user.username,
             uploaded_at=now_utc,
             ai_status="PENDING",
         )
