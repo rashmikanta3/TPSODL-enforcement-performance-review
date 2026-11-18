@@ -1,10 +1,10 @@
 // Field Collection Register & Upload Desk Logic
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Default dates to current month range
+    // Default dates to current month range (local dates; toISOString() would shift to UTC)
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const today = now.toISOString().split('T')[0];
+    const firstDay = localISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const today = localISODate(now);
 
     const fromInput = document.getElementById('coll-from-date');
     const toInput = document.getElementById('coll-to-date');
@@ -25,8 +25,8 @@ function downloadCollectionTemplate() {
 
 function resetCollectionFilters() {
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const today = now.toISOString().split('T')[0];
+    const firstDay = localISODate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const today = localISODate(now);
 
     document.getElementById('coll-from-date').value = firstDay;
     document.getElementById('coll-to-date').value = today;
@@ -92,7 +92,7 @@ async function handleCollectionUploadSubmit(e) {
                     <i class="fa-solid fa-circle-check me-2 text-success"></i>Collection Register Upload Ingested!
                 </div>
                 <div class="d-flex gap-4 flex-wrap mt-2">
-                    <div><strong>Total Processed:</strong> ${d.total_rows}</div>
+                    <div><strong>Total Processed:</strong> ${escapeHtml(d.total_rows)}</div>
                     <div><strong class="text-success">Inserted Records:</strong> ${inserted}</div>
                     <div><strong class="text-warning">Skipped Duplicates:</strong> ${skipped}</div>
                 </div>
@@ -101,13 +101,13 @@ async function handleCollectionUploadSubmit(e) {
             if (d.errors && d.errors.length) {
                 feedback.innerHTML += `<div class="mt-3 pt-2 border-top text-muted small">` +
                     `<strong>Notices (${d.errors.length} skipped):</strong><br>` +
-                    d.errors.slice(0, 8).map(er => `• Row ${er.row} (MR: ${er.mr}): ${er.reason}`).join('<br>') +
+                    d.errors.slice(0, 8).map(er => `• Row ${escapeHtml(er.row)} (MR: ${escapeHtml(er.mr)}): ${escapeHtml(er.reason)}`).join('<br>') +
                     `</div>`;
             }
             showToast(`Collection upload completed! Inserted ${inserted} records (${skipped} duplicates skipped).`);
         } else {
             feedback.className = 'alert alert-danger mt-3 p-3 rounded-3 small';
-            feedback.innerHTML = `<i class="fa-solid fa-circle-xmark me-2"></i>${d.message || "Failed to parse records."}`;
+            feedback.innerHTML = `<i class="fa-solid fa-circle-xmark me-2"></i>${escapeHtml(d.message || "Failed to parse records.")}`;
         }
 
         // Refresh stats

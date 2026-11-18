@@ -3,7 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('att-date');
     if (dateInput) {
-        dateInput.value = new Date().toISOString().split('T')[0];
+        dateInput.value = localISODate();
     }
     if (typeof populateOperationalCircleSelect === 'function') {
         populateOperationalCircleSelect('att-circle-filter', onAttendanceCircleChange);
@@ -29,10 +29,10 @@ async function onAttendanceCircleChange() {
 
         const opts = currentCircleTeams.map(t => {
             const tag = (t.has_vehicle === false || t.is_office_team) ? ' [Office Team - No Vehicle]' : '';
-            return `<option value="${t.id}">${t.name}${tag}</option>`;
+            return `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}${tag}</option>`;
         }).join('');
-        teamSelect.innerHTML = '<option value="">-- Choose Squad in ' + circle + ' --</option>' + opts;
-        mergeSelect.innerHTML = '<option value="">-- Select Partner Squad in ' + circle + ' --</option>' + opts;
+        teamSelect.innerHTML = '<option value="">-- Choose Squad in ' + escapeHtml(circle) + ' --</option>' + opts;
+        mergeSelect.innerHTML = '<option value="">-- Select Partner Squad in ' + escapeHtml(circle) + ' --</option>' + opts;
 
         // 2. Load TPSODL Team Leaders for this circle
         const resTLs = await fetch(`/api/attendance/tls-by-circle/${encodeURIComponent(circle)}`);
@@ -41,9 +41,9 @@ async function onAttendanceCircleChange() {
         tlSelect.innerHTML = '<option value="">-- Select Team Leader --</option>' +
             currentCircleTLs.map(tl => {
                 if (typeof tl === 'object' && tl !== null) {
-                    return `<option value="${tl.id}" data-name="${tl.name}">${tl.name} (${tl.tl_code})</option>`;
+                    return `<option value="${escapeHtml(tl.id)}" data-name="${escapeHtml(tl.name)}">${escapeHtml(tl.name)} (${escapeHtml(tl.tl_code)})</option>`;
                 }
-                return `<option value="${tl}" data-name="${tl}">${tl}</option>`;
+                return `<option value="${escapeHtml(tl)}" data-name="${escapeHtml(tl)}">${escapeHtml(tl)}</option>`;
             }).join('');
 
         // Check if user is squad-isolated
@@ -113,11 +113,11 @@ async function onDateOrTeamChange() {
         } else {
             tbody.innerHTML = members.map(m => `
                 <tr>
-                    <td><strong class="text-primary">${m.emp_code}</strong></td>
-                    <td class="fw-semibold">${m.name}</td>
-                    <td><span class="badge bg-light text-dark border">${m.designation}</span></td>
+                    <td><strong class="text-primary">${escapeHtml(m.emp_code)}</strong></td>
+                    <td class="fw-semibold">${escapeHtml(m.name)}</td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(m.designation)}</span></td>
                     <td class="text-center" style="min-width: 180px;">
-                        <input type="hidden" class="att-emp-id" value="${m.id}">
+                        <input type="hidden" class="att-emp-id" value="${escapeHtml(m.id)}">
                         <select class="form-select form-select-sm fw-semibold text-center att-status-select" name="status_${m.id}" id="status_${m.id}">
                             <option value="P" selected>P (Present)</option>
                             <option value="A">A (Absent)</option>
@@ -374,7 +374,7 @@ async function handleAttendanceSubmit(e) {
         banner.style.backgroundColor = '#ecfdf5';
         banner.style.color = '#065f46';
         banner.style.border = '1px solid #a7f3d0';
-        banner.innerHTML = `<i class="fa-solid fa-circle-check me-2"></i>${data.message}`;
+        banner.innerHTML = `<i class="fa-solid fa-circle-check me-2"></i>${escapeHtml(data.message)}`;
 
         showToast(data.message);
     } catch(err) {

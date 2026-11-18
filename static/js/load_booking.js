@@ -13,10 +13,10 @@ function showDuplicateLbModal(data, onConfirm) {
     const msgEl = document.getElementById('duplicateVcrModalMsg');
     const detailsEl = document.getElementById('duplicateVcrDetails');
     if (msgEl) {
-        msgEl.innerHTML = `VCR Number <strong>${data.vcr_number}</strong> has already been recorded.`;
+        msgEl.innerHTML = `VCR Number <strong>${escapeHtml(data.vcr_number)}</strong> has already been recorded.`;
     }
     if (detailsEl) {
-        detailsEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-warning me-1"></i> ${data.details || 'A record with this VCR number already exists.'}`;
+        detailsEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-warning me-1"></i> ${escapeHtml(data.details || 'A record with this VCR number already exists.')}`;
     }
 
     const modal = new bootstrap.Modal(modalEl);
@@ -158,7 +158,7 @@ function normalizeCircle(name) {
 document.addEventListener('DOMContentLoaded', () => {
     // Set default booking date to today
     const dInput = document.getElementById('lbBookingDate');
-    if (dInput) dInput.value = new Date().toISOString().split('T')[0];
+    if (dInput) dInput.value = localISODate();
 
     // Clear duplicate page errors on input
     const pageInput = document.getElementById('lbPageNumber');
@@ -280,7 +280,7 @@ async function verifyEmployeeCode() {
         if (notice) {
             notice.style.display = 'block';
             notice.className = 'small mt-1 text-success fw-semibold';
-            notice.innerHTML = `<i class="fa-solid fa-circle-check me-1"></i> Verified: <strong>${data.name}</strong> (${resolvedCircle})`;
+            notice.innerHTML = `<i class="fa-solid fa-circle-check me-1"></i> Verified: <strong>${escapeHtml(data.name)}</strong> (${escapeHtml(resolvedCircle)})`;
         }
 
         // Populate Dependent Electrical Hierarchy (Divisions for this circle)
@@ -306,7 +306,7 @@ async function verifyEmployeeCode() {
         if (notice) {
             notice.style.display = 'block';
             notice.className = 'small mt-1 text-danger fw-semibold';
-            notice.innerHTML = `<i class="fa-solid fa-circle-xmark me-1"></i> ${err.message}`;
+            notice.innerHTML = `<i class="fa-solid fa-circle-xmark me-1"></i> ${escapeHtml(err.message)}`;
         }
 
         showToast(err.message, "danger");
@@ -448,7 +448,7 @@ async function submitLoadBooking(e) {
     const theftTypeSelect = document.getElementById('lbTheftType');
     const theftType = theftTypeSelect ? theftTypeSelect.value : 'Hooking';
 
-    const bookingDate = document.getElementById('lbBookingDate').value || new Date().toISOString().split('T')[0];
+    const bookingDate = document.getElementById('lbBookingDate').value || localISODate();
     const vcrInput = document.getElementById('lbVcrNumber');
     const vcrNum = vcrInput ? vcrInput.value.trim() : '';
 
@@ -459,7 +459,7 @@ async function submitLoadBooking(e) {
             if (checkData.exists) {
                 showDuplicateLbModal(checkData, () => {
                     window._allowDuplicateLb = true;
-                    document.getElementById('formLoadBooking').dispatchEvent(new Event('submit'));
+                    document.getElementById('loadBookingForm').dispatchEvent(new Event('submit'));
                 });
                 return;
             }
@@ -524,7 +524,7 @@ async function submitLoadBooking(e) {
         if (errDetail.includes("Confirm to proceed")) {
             showDuplicateLbModal({ vcr_number: vcrNum, details: errDetail }, () => {
                 window._allowDuplicateLb = true;
-                document.getElementById('formLoadBooking').dispatchEvent(new Event('submit'));
+                document.getElementById('loadBookingForm').dispatchEvent(new Event('submit'));
             });
             return;
         }
@@ -591,20 +591,20 @@ async function loadRecentLoadBookings(pageNo = null) {
 
             return `
                 <tr>
-                    <td class="fw-semibold text-dark">${b.booking_date}</td>
-                    <td><code>${b.book_number}</code> / <strong>${b.page_no}</strong></td>
-                    <td><code>${b.vcr_number || '-'}</code></td>
-                    <td><span class="badge bg-light text-dark border">${b.team_name}</span> <small class="text-muted">(${b.circle})</small></td>
-                    <td><small class="text-muted">${b.subdivision || '-'} / ${b.section || '-'}</small></td>
-                    <td><span class="badge bg-info-subtle text-info-emphasis border">${b.theft_type}</span></td>
-                    <td><strong class="text-primary">${b.booked_load} kW</strong></td>
+                    <td class="fw-semibold text-dark">${escapeHtml(b.booking_date)}</td>
+                    <td><code>${escapeHtml(b.book_number)}</code> / <strong>${escapeHtml(b.page_no)}</strong></td>
+                    <td><code>${escapeHtml(b.vcr_number || '-')}</code></td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(b.team_name)}</span> <small class="text-muted">(${escapeHtml(b.circle)})</small></td>
+                    <td><small class="text-muted">${escapeHtml(b.subdivision || '-')} / ${escapeHtml(b.section || '-')}</small></td>
+                    <td><span class="badge bg-info-subtle text-info-emphasis border">${escapeHtml(b.theft_type)}</span></td>
+                    <td><strong class="text-primary">${escapeHtml(b.booked_load)} kW</strong></td>
                     <td>${lockBadge}</td>
                     <td class="text-end">${actionButtons}</td>
                 </tr>
             `;
         }).join('');
     } catch(err) {
-        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-3">Failed to load recent bookings: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-3">Failed to load recent bookings: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 

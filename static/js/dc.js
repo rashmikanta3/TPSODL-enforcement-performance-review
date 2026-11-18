@@ -13,10 +13,10 @@ function showDuplicateDcModal(data, onConfirm) {
     const msgEl = document.getElementById('duplicateVcrModalMsg');
     const detailsEl = document.getElementById('duplicateVcrDetails');
     if (msgEl) {
-        msgEl.innerHTML = `VCR Number <strong>${data.vcr_number}</strong> has already been recorded for Disconnection.`;
+        msgEl.innerHTML = `VCR Number <strong>${escapeHtml(data.vcr_number)}</strong> has already been recorded for Disconnection.`;
     }
     if (detailsEl) {
-        detailsEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-warning me-1"></i> ${data.details || 'A disconnection record with this VCR number already exists.'}`;
+        detailsEl.innerHTML = `<i class="fa-solid fa-circle-exclamation text-warning me-1"></i> ${escapeHtml(data.details || 'A disconnection record with this VCR number already exists.')}`;
     }
 
     const modal = new bootstrap.Modal(modalEl);
@@ -37,7 +37,7 @@ function showDuplicateDcModal(data, onConfirm) {
 document.addEventListener('DOMContentLoaded', () => {
     const dcDateEl = document.getElementById('dcDate');
     if (dcDateEl) {
-        dcDateEl.value = new Date().toISOString().split('T')[0];
+        dcDateEl.value = localISODate();
     }
     if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
         const toggle = document.getElementById('dcSquadToggle');
@@ -141,12 +141,14 @@ async function lookupVCR() {
 async function handleSquadToggle() {
     const toggle = document.getElementById('dcSquadToggle');
     const container = document.getElementById('dcSquadSelectContainer');
+    const squadSelect = document.getElementById('dcActiveSquadSelect');
+    if (!toggle || !container) return;  // squad selector was removed from dc.html
     if (toggle.checked) {
         container.style.display = 'block';
         loadActiveSquads();
     } else {
         container.style.display = 'none';
-        document.getElementById('dcActiveSquadSelect').value = '';
+        if (squadSelect) squadSelect.value = '';
     }
 }
 
@@ -154,6 +156,7 @@ async function loadActiveSquads() {
     const dcDate = document.getElementById('dcDate').value;
     const circle = currentVCRCircle || document.getElementById('dcCircle').value;
     const select = document.getElementById('dcActiveSquadSelect');
+    if (!select) return;  // squad selector was removed from dc.html
 
     try {
         let url = `/api/attendance/active-squads?operation_date=${dcDate}`;
@@ -163,7 +166,7 @@ async function loadActiveSquads() {
         const squads = await res.json();
 
         select.innerHTML = '<option value="">-- Select Operating Squad --</option>' +
-            squads.map(s => `<option value="${s.id}">${s.name} (${s.tl_name} - ${s.mode})</option>`).join('');
+            squads.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${escapeHtml(s.tl_name)} - ${escapeHtml(s.mode)})</option>`).join('');
 
         if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
             const mySquadId = window.getUserSquadId();
@@ -208,7 +211,9 @@ async function submitDCPunch(e) {
 
     const toggle = document.getElementById('dcSquadToggle');
     const squadSelect = document.getElementById('dcActiveSquadSelect');
-    let teamId = (toggle.checked && squadSelect.value) ? parseInt(squadSelect.value) : null;
+    // The manual squad selector was removed from dc.html (team is resolved server-side),
+    // so these elements may be missing; reading toggle.checked used to crash DC save.
+    let teamId = (toggle && toggle.checked && squadSelect && squadSelect.value) ? parseInt(squadSelect.value) : null;
 
     if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
         teamId = window.getUserSquadId();
@@ -237,8 +242,9 @@ async function submitDCPunch(e) {
         showToast(data.message || "Disconnection Record saved successfully!");
         window._allowDuplicateDc = false;
         document.getElementById('dcForm').reset();
-        document.getElementById('dcDate').value = new Date().toISOString().split('T')[0];
-        document.getElementById('dcSquadSelectContainer').style.display = 'none';
+        document.getElementById('dcDate').value = localISODate();
+        const squadContainer = document.getElementById('dcSquadSelectContainer');
+        if (squadContainer) squadContainer.style.display = 'none';
         const nameDisp = document.getElementById('dcAuthorityTlName');
         if (nameDisp) nameDisp.value = '';
         const tlSel = document.getElementById('dcTlSelect');
@@ -324,13 +330,13 @@ async function loadCircleTLs(circle) {
         const res = await fetch(`/api/admin/team-leads?circle=${encodeURIComponent(circle)}&active_only=true`);
         const tls = await res.json();
         if (!Array.isArray(tls) || tls.length === 0) {
-            select.innerHTML = `<option value="">-- No Active Team Leaders Found for ${circle} --</option>`;
+            select.innerHTML = `<option value="">-- No Active Team Leaders Found for ${escapeHtml(circle)} --</option>`;
             return;
         }
 
-        let html = `<option value="">-- Select Team Leader (${circle}) --</option>`;
+        let html = `<option value="">-- Select Team Leader (${escapeHtml(circle)}) --</option>`;
         tls.forEach(tl => {
-            html += `<option value="${tl.tl_code}" data-name="${tl.name}">${tl.name} (${tl.tl_code})</option>`;
+            html += `<option value="${escapeHtml(tl.tl_code)}" data-name="${escapeHtml(tl.name)}">${escapeHtml(tl.name)} (${escapeHtml(tl.tl_code)})</option>`;
         });
         select.innerHTML = html;
 
@@ -404,10 +410,10 @@ async function loadRecentDC(vcrNum = null) {
 
             return `
                 <tr>
-                    <td class="fw-semibold text-dark">${d.dc_date}</td>
-                    <td><code>${d.vcr_number}</code></td>
-                    <td><span class="badge bg-light text-dark border">${d.team_name}</span> <small class="text-muted">(${d.circle})</small></td>
-                    <td><small class="text-muted">${d.dc_authority_tl_code || '-'}</small></td>
+                    <td class="fw-semibold text-dark">${escapeHtml(d.dc_date)}</td>
+                    <td><code>${escapeHtml(d.vcr_number)}</code></td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(d.team_name)}</span> <small class="text-muted">(${escapeHtml(d.circle)})</small></td>
+                    <td><small class="text-muted">${escapeHtml(d.dc_authority_tl_code || '-')}</small></td>
                     <td><strong class="text-danger">₹${parseFloat(d.amount_pending || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</strong></td>
                     <td>${lockBadge}</td>
                     <td class="text-end">${actionButtons}</td>
@@ -415,7 +421,7 @@ async function loadRecentDC(vcrNum = null) {
             `;
         }).join('');
     } catch(err) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Failed to load recent disconnections: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Failed to load recent disconnections: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 

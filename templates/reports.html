@@ -234,7 +234,7 @@
             const res = await fetch(`/api/attendance/teams-by-circle/${encodeURIComponent(circle)}`);
             const teams = await res.json();
             teamSelect.innerHTML = '<option value="">All Teams (Circle Summary)</option>' +
-                teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+                teams.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join('');
         } catch(e) {
             console.error(e);
         }

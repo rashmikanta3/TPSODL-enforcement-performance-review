@@ -1,6 +1,21 @@
 // Global Application Utilities for TPSODL Enforcement Portal
 
+// Escape any server/user-supplied value before putting it into innerHTML / HTML attributes.
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+// Local (IST for our users) calendar date as YYYY-MM-DD. toISOString() gives the UTC date,
+// which is "yesterday" between 00:00 and 05:30 IST.
+function localISODate(d = new Date()) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function showToast(message, type = 'success') {
+    message = escapeHtml(message);
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');

@@ -420,7 +420,7 @@ async function reEvaluatePvr() {
 document.addEventListener('DOMContentLoaded', () => {
     // Set default date to today
     const dateInput = document.getElementById('pvrReportDate');
-    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    if (dateInput) dateInput.value = localISODate();
 
     // Populate circle dropdown
     populateOperationalCircleSelect('pvrCircle', loadRecentPvrs);

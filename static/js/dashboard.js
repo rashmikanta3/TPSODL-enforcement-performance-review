@@ -1136,7 +1136,9 @@ async function shareSquadTable(mode = 'whatsapp') {
 function exportDashLoadBookings(format) {
     const { from, to } = getDates();
     const circle = getCircleFilterValue();
-    let url = `/api/reports/load-bookings/export?format=${format}&from_date=${from}&to_date=${to}`;
+    // Backend routes are /api/reports/load-bookings/excel and /pdf (there is no /export route)
+    const kind = format === 'pdf' ? 'pdf' : 'excel';
+    let url = `/api/reports/load-bookings/${kind}?from_date=${from}&to_date=${to}`;
     if (circle) url += `&circle=${encodeURIComponent(circle)}`;
     window.location.href = url;
 }

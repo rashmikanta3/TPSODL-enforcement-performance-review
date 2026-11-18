@@ -40,7 +40,7 @@ async function loadAllTeams() {
         populateUserSquadOptions();
     } catch(err) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 }
@@ -74,15 +74,15 @@ function renderTeamsTable(teams) {
             : `<button type="button" class="btn btn-outline-success btn-sm py-0 px-2" onclick="toggleTeamStatus(${t.id})" title="Activate Squad">Activate</button>`;
 
         const tlDisplay = t.default_tl_name 
-            ? `${t.default_tl_name} ${t.default_tl_code ? `<code class="ms-1 text-primary">(${t.default_tl_code})</code>` : ''}`
+            ? `${escapeHtml(t.default_tl_name)} ${t.default_tl_code ? `<code class="ms-1 text-primary">(${escapeHtml(t.default_tl_code)})</code>` : ''}`
             : (t.assigned_team_lead || '<span class="text-muted">-</span>');
 
         return `
             <tr id="teamRow_${t.id}">
                 <td class="text-muted fw-bold">${t.id}</td>
-                <td class="fw-bold text-dark">${t.name} ${officeBadge}</td>
-                <td><span class="badge bg-light text-primary border">${t.circle}</span></td>
-                <td>${t.supervisor_name || '<span class="text-muted">-</span>'}</td>
+                <td class="fw-bold text-dark">${escapeHtml(t.name)} ${officeBadge}</td>
+                <td><span class="badge bg-light text-primary border">${escapeHtml(t.circle)}</span></td>
+                <td>${t.supervisor_name ? escapeHtml(t.supervisor_name) : '<span class="text-muted">-</span>'}</td>
                 <td>${tlDisplay}</td>
                 <td id="teamStatusCell_${t.id}">${statusBadge}</td>
                 <td class="text-end">
@@ -114,7 +114,7 @@ function filterSquadOptionsByCircle(circle, selectElementId, selectedTeamId = nu
     sel.innerHTML = '<option value="">-- Unassigned / Individual --</option>' +
         filtered.map(t => {
             const isSel = (selectedTeamId && t.id === parseInt(selectedTeamId)) ? 'selected' : '';
-            return `<option value="${t.id}" ${isSel}>${t.name} (${t.circle})</option>`;
+            return `<option value="${t.id}" ${isSel}>${escapeHtml(t.name)} (${escapeHtml(t.circle)})</option>`;
         }).join('');
 }
 
@@ -133,7 +133,7 @@ function filterTLOptionsByCircle(circle, selectElementId, selectedTLId = null) {
     sel.innerHTML = '<option value="">-- Select Permanent TL --</option>' +
         filtered.map(tl => {
             const isSel = (selectedTLId && tl.id === parseInt(selectedTLId)) ? 'selected' : '';
-            return `<option value="${tl.id}" data-name="${tl.name}" ${isSel}>${tl.name} (${tl.tl_code})</option>`;
+            return `<option value="${tl.id}" data-name="${escapeHtml(tl.name)}" ${isSel}>${escapeHtml(tl.name)} (${escapeHtml(tl.tl_code)})</option>`;
         }).join('');
 }
 
@@ -311,7 +311,7 @@ async function loadAllTeamLeads(circle = '') {
         }
     } catch(err) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 }
@@ -336,11 +336,11 @@ function renderTeamLeadsTable(tls) {
 
         return `
             <tr id="tlRow_${tl.id}">
-                <td><code class="fw-bold text-primary">${tl.tl_code}</code></td>
-                <td class="fw-bold text-dark">${tl.name}</td>
-                <td>${tl.designation || '<span class="text-muted">-</span>'}</td>
-                <td><span class="badge bg-light text-primary border">${tl.circle}</span></td>
-                <td>${tl.contact_no || '<span class="text-muted">-</span>'}</td>
+                <td><code class="fw-bold text-primary">${escapeHtml(tl.tl_code)}</code></td>
+                <td class="fw-bold text-dark">${escapeHtml(tl.name)}</td>
+                <td>${tl.designation ? escapeHtml(tl.designation) : '<span class="text-muted">-</span>'}</td>
+                <td><span class="badge bg-light text-primary border">${escapeHtml(tl.circle)}</span></td>
+                <td>${tl.contact_no ? escapeHtml(tl.contact_no) : '<span class="text-muted">-</span>'}</td>
                 <td id="tlStatusCell_${tl.id}">${statusBadge}</td>
                 <td class="text-end">
                     <div class="d-inline-flex gap-1">
@@ -509,7 +509,7 @@ async function loadAllEmployees(circle = '') {
         renderEmployeesTable(globalEmployeesCache);
     } catch(err) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 }
@@ -539,11 +539,11 @@ function renderEmployeesTable(emps) {
 
         return `
             <tr id="empRow_${e.id}">
-                <td><code class="fw-bold">${e.emp_code}</code></td>
-                <td class="fw-bold text-dark">${e.name}</td>
-                <td>${e.designation || '<span class="text-muted">-</span>'}</td>
-                <td><span class="badge bg-light text-primary border">${e.circle}</span></td>
-                <td><span class="badge bg-light text-dark border">${e.team_name || 'Unassigned'}</span></td>
+                <td><code class="fw-bold">${escapeHtml(e.emp_code)}</code></td>
+                <td class="fw-bold text-dark">${escapeHtml(e.name)}</td>
+                <td>${e.designation ? escapeHtml(e.designation) : '<span class="text-muted">-</span>'}</td>
+                <td><span class="badge bg-light text-primary border">${escapeHtml(e.circle)}</span></td>
+                <td><span class="badge bg-light text-dark border">${escapeHtml(e.team_name || 'Unassigned')}</span></td>
                 <td id="empStatusCell_${e.id}">${statusBadge}</td>
                 <td class="text-end">
                     <div class="d-inline-flex gap-1">
@@ -714,7 +714,7 @@ async function loadAllUsers() {
         renderUsersTable(globalUsersCache);
     } catch(err) {
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-1"></i> ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 }
@@ -738,7 +738,7 @@ function renderUsersTable(users) {
         if (u.role === 'ADMIN') roleBadgeClass = 'bg-danger';
         else if (u.role === 'SUB_ADMIN') roleBadgeClass = 'bg-primary';
 
-        const roleBadge = `<span class="badge ${roleBadgeClass} px-2 py-1">${u.role}</span>`;
+        const roleBadge = `<span class="badge ${roleBadgeClass} px-2 py-1">${escapeHtml(u.role)}</span>`;
 
         const canEditBadge = u.can_edit
             ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Read / Write</span>'
@@ -753,12 +753,12 @@ function renderUsersTable(users) {
             : `<button type="button" class="btn btn-outline-success btn-sm py-0 px-2" onclick="toggleUserStatus(${u.id})" title="Restore Login Access">Activate</button>`;
 
         const squadOrCircle = (u.role === 'USER')
-            ? (u.team_name ? `<span class="badge bg-primary-subtle text-primary border border-primary-subtle"><i class="fa-solid fa-users me-1"></i> ${u.team_name}</span>` : '<span class="badge bg-warning-subtle text-dark border">No Squad Assigned</span>')
-            : `<span class="badge bg-light text-dark border">${u.circle || 'ALL'}</span>`;
+            ? (u.team_name ? `<span class="badge bg-primary-subtle text-primary border border-primary-subtle"><i class="fa-solid fa-users me-1"></i> ${escapeHtml(u.team_name)}</span>` : '<span class="badge bg-warning-subtle text-dark border">No Squad Assigned</span>')
+            : `<span class="badge bg-light text-dark border">${escapeHtml(u.circle || 'ALL')}</span>`;
 
         return `
             <tr id="userRow_${u.id}">
-                <td class="fw-bold text-dark"><i class="fa-solid fa-user-circle text-secondary me-1"></i> ${u.username}</td>
+                <td class="fw-bold text-dark"><i class="fa-solid fa-user-circle text-secondary me-1"></i> ${escapeHtml(u.username)}</td>
                 <td>${roleBadge}</td>
                 <td>${squadOrCircle}</td>
                 <td>${canEditBadge}</td>
@@ -782,7 +782,7 @@ function populateUserSquadOptions() {
     const teams = globalTeamsCache || [];
     let html = '<option value="">-- Select Assigned Squad --</option>';
     teams.forEach(t => {
-        html += `<option value="${t.id}">${t.name} (${t.circle})</option>`;
+        html += `<option value="${t.id}">${escapeHtml(t.name)} (${escapeHtml(t.circle)})</option>`;
     });
     if (usrTeamEl) usrTeamEl.innerHTML = html;
     if (editTeamEl) editTeamEl.innerHTML = html;

@@ -2,7 +2,7 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const dInput = document.getElementById('log-date');
-    if (dInput) dInput.value = new Date().toISOString().split('T')[0];
+    if (dInput) dInput.value = localISODate();
 
     const startT = document.getElementById('lbStartTime');
     if (startT && !startT.value) startT.value = '09:00';
@@ -30,8 +30,8 @@ async function onLogCircleChange() {
         logCircleTeams = (allTeams || []).filter(t => t.has_vehicle !== false && !t.is_office_team);
 
         const teamSelect = document.getElementById('log-team');
-        teamSelect.innerHTML = '<option value="">-- Choose Field Squad in ' + circle + ' --</option>' +
-            logCircleTeams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+        teamSelect.innerHTML = '<option value="">-- Choose Field Squad in ' + escapeHtml(circle) + ' --</option>' +
+            logCircleTeams.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 
         // Squad user isolation: lock to assigned squad
         if (typeof window.isSquadUser === 'function' && window.isSquadUser()) {
@@ -203,18 +203,18 @@ async function loadRecentLogs() {
 
             return `
                 <tr>
-                    <td class="fw-semibold text-dark">${l.date}</td>
-                    <td><span class="badge bg-light text-dark border">${l.team_name}</span> <small class="text-muted">(${l.circle})</small></td>
-                    <td><code>${l.vehicle_no}</code></td>
-                    <td><small class="text-muted">${l.start_time} - ${l.end_time}</small></td>
-                    <td><strong class="text-primary">${l.run_km} KM</strong> <small class="text-muted">(${l.start_km} - ${l.end_km})</small></td>
+                    <td class="fw-semibold text-dark">${escapeHtml(l.date)}</td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(l.team_name)}</span> <small class="text-muted">(${escapeHtml(l.circle)})</small></td>
+                    <td><code>${escapeHtml(l.vehicle_no)}</code></td>
+                    <td><small class="text-muted">${escapeHtml(l.start_time)} - ${escapeHtml(l.end_time)}</small></td>
+                    <td><strong class="text-primary">${escapeHtml(l.run_km)} KM</strong> <small class="text-muted">(${escapeHtml(l.start_km)} - ${escapeHtml(l.end_km)})</small></td>
                     <td>${lockBadge}</td>
                     <td class="text-end">${actionButtons}</td>
                 </tr>
             `;
         }).join('');
     } catch(err) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Failed to load recent logs: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">Failed to load recent logs: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 

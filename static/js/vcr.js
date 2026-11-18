@@ -55,7 +55,7 @@ function updateSelectedFileDisplay(file) {
 
     const sizeKb = (file.size / 1024).toFixed(1);
     fileBadge.className = 'badge bg-success-subtle text-success border border-success-subtle px-3 py-1 shadow-sm small';
-    fileBadge.innerHTML = `<i class="fa-solid fa-file-excel me-1"></i> <strong>${file.name}</strong> (${sizeKb} KB)`;
+    fileBadge.innerHTML = `<i class="fa-solid fa-file-excel me-1"></i> <strong>${escapeHtml(file.name)}</strong> (${sizeKb} KB)`;
 }
 
 function downloadVCRTemplate() {
@@ -103,9 +103,9 @@ async function uploadVCRBulk(e) {
             if (data.errors && data.errors.length > 0 && tbody) {
                 tbody.innerHTML = data.errors.map(err => `
                     <tr>
-                        <td class="fw-bold">${err.row || '-'}</td>
-                        <td><code>${err.vcr || '-'}</code></td>
-                        <td class="text-danger">${err.reason || '-'}</td>
+                        <td class="fw-bold">${escapeHtml(err.row || '-')}</td>
+                        <td><code>${escapeHtml(err.vcr || '-')}</code></td>
+                        <td class="text-danger">${escapeHtml(err.reason || '-')}</td>
                     </tr>
                 `).join('');
                 if (logContainer) logContainer.style.display = 'block';

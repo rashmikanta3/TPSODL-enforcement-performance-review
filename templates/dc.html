@@ -99,7 +99,7 @@
                     <div class="row g-2 mb-3">
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DC Date</label>
-                            <input type="date" id="dcDate" class="form-control form-control-sm" required onchange="if(document.getElementById('dcSquadToggle').checked) loadActiveSquads()">
+                            <input type="date" id="dcDate" class="form-control form-control-sm" required onchange="const t = document.getElementById('dcSquadToggle'); if (t && t.checked) loadActiveSquads()">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">Amount Pending (₹)</label>
