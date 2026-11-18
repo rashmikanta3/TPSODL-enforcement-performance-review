@@ -137,6 +137,7 @@ const OPERATIONAL_ROUTES = [
     '/load-booking',
     '/dc',
     '/collection',
+    '/pvr',
     '/vcr-desk',
     '/vcr',
     '/admin-desk',

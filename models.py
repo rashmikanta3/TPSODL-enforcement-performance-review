@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Date,
+    Column, Integer, String, Float, Boolean, Date, DateTime,
     ForeignKey, Text, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, synonym
@@ -333,4 +333,32 @@ class Collection(Base):
     __table_args__ = (
         Index("idx_coll_date_team", "payment_date", "team_name"),
         Index("idx_coll_date_circle", "payment_date", "circle"),
+    )
+
+
+# =========================================================================
+# 12. PVR REPORTS (Patrolling Verification Reports & AI Quality Audit)
+# =========================================================================
+class PVRReport(Base):
+    __tablename__ = "pvr_reports"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tl_code = Column(String(50), index=True, nullable=False)
+    tl_name = Column(String(100), nullable=False)
+    circle = Column(String(50), index=True, nullable=False)
+    report_date = Column(Date, index=True, nullable=False)
+    r2_key = Column(String(500), nullable=False)
+    file_size_bytes = Column(Integer, nullable=True)
+    uploaded_by = Column(String(50), nullable=True)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    ai_status = Column(String(20), default="PENDING", nullable=False)  # PENDING, PROCESSING, DONE, FAILED
+    ai_score = Column(Integer, nullable=True)  # 0 to 10
+    ai_verdict = Column(String(20), nullable=True)  # GOOD, AVERAGE, POOR
+    ai_summary = Column(Text, nullable=True)
+    ai_findings_json = Column(Text, nullable=True)
+    ai_evaluated_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("tl_code", "report_date", name="uq_pvr_tl_date"),
+        Index("idx_pvr_date_circle", "report_date", "circle"),
     )

@@ -35,6 +35,20 @@ class Settings(BaseSettings):
         "NON_OPERATIONAL"
     ]
 
+    # ── R2 Cloud Storage (Cloudflare) ──
+    R2_ACCOUNT_ID: str = os.getenv("R2_ACCOUNT_ID", "")
+    R2_ACCESS_KEY_ID: str = os.getenv("R2_ACCESS_KEY_ID", "")
+    R2_SECRET_ACCESS_KEY: str = os.getenv("R2_SECRET_ACCESS_KEY", "")
+    R2_BUCKET: str = os.getenv("R2_BUCKET", "")
+    R2_PREFIX: str = os.getenv("R2_PREFIX", "pvr")
+
+    # ── Gemini AI ──
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+    # ── PVR Upload Limits ──
+    PVR_MAX_UPLOAD_MB: int = int(os.getenv("PVR_MAX_UPLOAD_MB", "15"))
+
     class Config:
         env_file = ".env"
         extra = "ignore"
