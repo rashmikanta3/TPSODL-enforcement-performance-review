@@ -11,6 +11,7 @@ from database import get_db
 from models import DisconnectionRecord, VCRMaster, TeamLead, Employee, DailyTeamOperation, Team, User, get_assigned_circles, is_circle_authorized
 from schemas import DCPunchRequest
 from auth import get_current_actor, verify_write_permission, verify_team_permission, expand_circles
+from config import today_ist
 
 router = APIRouter()
 
@@ -365,7 +366,7 @@ def export_dc_excel(
     wb.save(stream)
     stream.seek(0)
 
-    filename = f"Disconnections_{date.today().isoformat()}.xlsx"
+    filename = f"Disconnections_{today_ist().isoformat()}.xlsx"
     return Response(
         content=stream.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

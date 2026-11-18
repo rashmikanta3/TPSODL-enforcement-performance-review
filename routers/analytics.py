@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case, or_
 from database import get_db
+from config import today_ist, now_ist
 from models import (
     LoadBooking, Collection, DisconnectionRecord, VCRMaster,
     Team, Employee, DailyTeamOperation, VehicleLogBook, Attendance
@@ -48,8 +49,8 @@ def apply_circle_filter(query, column, circle: Optional[str]):
 
 @router.get("/kpis")
 def get_kpis(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -113,8 +114,8 @@ def get_kpis(
 
 @router.get("/charts/load-booking-hierarchy")
 def get_charts_load_booking_hierarchy(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     level: str = Query("circle"),
     circle: Optional[str] = None,
     division: Optional[str] = None,
@@ -209,8 +210,8 @@ def get_charts_load_booking_hierarchy(
 
 @router.get("/charts/load-booking")
 def get_charts_load_booking(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -277,8 +278,8 @@ def get_charts_load_booking(
 
 @router.get("/charts/collections")
 def get_charts_collections(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -354,8 +355,8 @@ def get_charts_collections(
 
 @router.get("/charts/collectors")
 def get_charts_collectors(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     limit: Optional[int] = 20,
     db: Session = Depends(get_db)
@@ -391,8 +392,8 @@ def get_charts_collectors(
 
 @router.get("/charts/disconnections")
 def get_charts_disconnections(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -449,8 +450,8 @@ def get_charts_disconnections(
 
 @router.get("/charts")
 def get_charts(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -491,8 +492,7 @@ def get_team_operations_status(
     - Merged
     - Non-Operational
     """
-    from datetime import date as date_type
-    target_date = op_date or date or to_date or from_date or date_type.today()
+    target_date = op_date or date or to_date or from_date or today_ist()
     c_upper = normalize_circle(circle)
 
     t_q = db.query(Team).filter(Team.is_active == True)
@@ -769,8 +769,8 @@ def build_squad_performance(from_date: date, to_date: date, circle: Optional[str
 
 @router.get("/squad-performance")
 def get_squad_performance(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -806,8 +806,8 @@ def _field_squad_only(team_fk_col):
 def get_charts_breakdown(
     metric: str = Query("load", description="load | dc | collection"),
     level: str = Query("circle", description="circle | division | subdivision | section | team | collector"),
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     division: Optional[str] = None,
     subdivision: Optional[str] = None,
@@ -954,8 +954,8 @@ MODE_LABELS = {
 
 @router.get("/squad-performance/export")
 def export_squad_performance(
-    from_date: date = Query(default_factory=date.today),
-    to_date: date = Query(default_factory=date.today),
+    from_date: date = Query(default_factory=today_ist),
+    to_date: date = Query(default_factory=today_ist),
     circle: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -998,7 +998,7 @@ def export_squad_performance(
     ws.row_dimensions[1].height = 30
 
     ws.merge_cells(f"A2:{last_col}2")
-    ws["A2"] = f"Period: {period}     |     Circle: {circle_txt}     |     Generated: {datetime.now():%d-%b-%Y %H:%M}"
+    ws["A2"] = f"Period: {period}     |     Circle: {circle_txt}     |     Generated: {now_ist():%d-%b-%Y %H:%M}"
     ws["A2"].font = Font(bold=True, size=11, color="0B2545")
 
     c = data["counts"]

@@ -3,6 +3,7 @@ import calendar
 from datetime import datetime, date
 from typing import Optional, List, Dict
 from xml.sax.saxutils import escape
+from config import now_ist
 
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
@@ -182,7 +183,7 @@ def make_signature_footer(sig_lines: List[str]):
     Draws ONE signature block (with a signing line) at the bottom right of
     every page, plus the generation time and page number.
     """
-    generated = datetime.now().strftime("%d-%m-%Y %H:%M")
+    generated = now_ist().strftime("%d-%m-%Y %H:%M")
 
     def draw_footer(canv, doc):
         w = doc.pagesize[0]

@@ -2,6 +2,7 @@ import io
 import calendar
 from datetime import datetime, date
 from typing import Optional, List, Dict
+from config import now_ist
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side, Protection
 from openpyxl.utils import get_column_letter
@@ -960,7 +961,7 @@ def build_load_booking_excel(
         ws, circle if circle and circle.upper() != "ALL" else None,
         title_lines=["TP SOUTHERN ODISHA DISTRIBUTION LIMITED (TPSODL)",
                      f"UNAUTHORIZED LOAD BOOKING REGISTER - {period.upper()}"],
-        meta=f"Circle: {circle_up} | Period: {period} | Generated On: {datetime.now().strftime('%d-%m-%Y %H:%M')}",
+        meta=f"Circle: {circle_up} | Period: {period} | Generated On: {now_ist().strftime('%d-%m-%Y %H:%M')}",
         headers=["Sl No.", "Booking Date", "Page No", "Punching Officer", "Team / Squad", "Circle",
                  "Division", "Sub Division", "Section", "PIN Code", "Theft Category",
                  "Booked Load (kW)", "Status"],
