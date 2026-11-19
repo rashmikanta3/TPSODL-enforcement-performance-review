@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}Operational Registers & Formal Report Downloads - TPSODL{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-4">
+    <div class="card-body p-4">
+        <h4 class="fw-bold mb-1 text-dark">
+            <i class="fa-solid fa-file-pdf text-danger me-2"></i>Operational Registers & Formal Report Downloads
+        </h4>
+        <p class="text-muted small mb-0">
+            Generate official A4 print-ready PDF reports and exportable Excel registers (.xlsx) team-wise and circle-wise.
+        </p>
+
+        <!-- Filter Bar -->
+        <div class="p-3 bg-light rounded-3 border mt-3 mb-4">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label small mb-1 fw-bold">Circle</label>
+                    <select id="rep-circle" class="form-select form-select-sm fw-semibold" onchange="onReportCircleChange()">
+                        <option value="BERHAMPUR">BERHAMPUR</option>
+                        <option value="CITY">CITY</option>
+                        <option value="ASKA">ASKA</option>
+                        <option value="BHANJANAGAR">BHANJANAGAR</option>
+                        <option value="JEYPORE">JEYPORE</option>
+                        <option value="RAYAGADA">RAYAGADA</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1 fw-bold">Team Scope</label>
+                    <select id="rep-team" class="form-select form-select-sm fw-semibold">
+                        <option value="">All Teams (Circle Summary)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1 fw-bold">Year</label>
+                    <input type="number" id="rep-year" class="form-control form-control-sm fw-semibold" value="2026">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1 fw-bold">Month</label>
+                    <select id="rep-month" class="form-select form-select-sm fw-semibold">
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11" selected>November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5 Report Cards Grid -->
+        <div class="row g-3">
+            <!-- 1. Form D Attendance -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-info">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-clipboard-user text-primary me-2"></i>Form D Attendance Register</h6>
+                                <span class="badge bg-light text-primary border">Monthly Register</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Statutory Form D muster roll showing daily employee attendance codes (P/A/L/WO), designation, Sunday shading, and total summary counts. Protected with <code>TPSODL@MIS</code>.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('form-d', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('form-d', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Circle Vehicle Log Summary -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-primary">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-truck-moving text-primary me-2"></i>Circle Vehicle Log Summary</h6>
+                                <span class="badge bg-light text-primary border">Circle Scope</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Consolidated monthly patrol kilometer summary across all squad vehicles, team leaders, supervisors, and executive engineer endorsement.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('circle-log', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('circle-log', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Team Daily Vehicle Log Book -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-secondary">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-route text-secondary me-2"></i>Team Daily Vehicle Log Book</h6>
+                                <span class="badge bg-light text-secondary border">Specific Team</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Detailed daily trip logs, route information, start KM, end KM, running distance calculation, and driver/supervisor signature lines.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('team-log', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('team-log', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Team Operational Performance Report -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-warning">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-trophy text-warning me-2"></i>Team Performance Report</h6>
+                                <span class="badge bg-light text-warning text-dark border">Enforcement</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Daily performance register recording squad operation modes (Independent vs. Merged), booked load (kW), collections (₹), and DC counts.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('performance', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('performance', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Field Collection Register -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-success">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-coins text-success me-2"></i>Field Collection Register</h6>
+                                <span class="badge bg-light text-success border">Financials</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Official money receipt (MR) register documenting payment dates, hierarchy (Division, Subdiv, Section), VCR numbers, and collecting officers.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('collection', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('collection', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 6. All Load Bookings Register -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-top border-4 border-danger">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-gauge-high text-danger me-2"></i>Load Booking Register</h6>
+                                <span class="badge bg-light text-danger border">Theft Bookings</span>
+                            </div>
+                            <p class="small text-muted mb-3">
+                                Consolidated register of all unauthorized load bookings, theft classifications, book page numbers, and kW loads. Export read-only Excel with =SUM() formula or A4 Landscape PDF.
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2 pt-2 border-top">
+                            <button type="button" onclick="downloadReport('load-booking', 'pdf')" class="btn btn-outline-danger btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-pdf me-1"></i> PDF
+                            </button>
+                            <button type="button" onclick="downloadReport('load-booking', 'excel')" class="btn btn-outline-success btn-sm flex-fill fw-bold">
+                                <i class="fa-solid fa-file-excel me-1"></i> Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const now = new Date();
+        document.getElementById('rep-year').value = now.getFullYear();
+        document.getElementById('rep-month').value = now.getMonth() + 1;
+        if (typeof populateOperationalCircleSelect === 'function') {
+            populateOperationalCircleSelect('rep-circle', onReportCircleChange);
+        } else {
+            onReportCircleChange();
+        }
+    });
+
+    async function onReportCircleChange() {
+        const circle = document.getElementById('rep-circle').value;
+        const teamSelect = document.getElementById('rep-team');
+        if (!circle) return;
+
+        try {
+            const res = await fetch(`/api/attendance/teams-by-circle/${encodeURIComponent(circle)}`);
+            const teams = await res.json();
+            teamSelect.innerHTML = '<option value="">All Teams (Circle Summary)</option>' +
+                teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    function downloadReport(reportType, format) {
+        const circle = document.getElementById('rep-circle').value;
+        const teamId = document.getElementById('rep-team').value;
+        const year = document.getElementById('rep-year').value;
+        const month = document.getElementById('rep-month').value;
+
+        let endpoint = '';
+        if (reportType === 'form-d') {
+            endpoint = `/api/reports/form-d?circle_name=${encodeURIComponent(circle)}&year=${year}&month=${month}&format=${format}`;
+            if (teamId) endpoint += `&team_id=${teamId}`;
+        } else if (reportType === 'circle-log') {
+            endpoint = `/api/reports/vehicle-log?circle_name=${encodeURIComponent(circle)}&year=${year}&month=${month}&format=${format}`;
+        } else if (reportType === 'team-log') {
+            if (!teamId) {
+                alert("Please select a specific squad from 'Team Scope' dropdown to export Team Daily Log Book!");
+                return;
+            }
+            endpoint = `/api/reports/vehicle-log?circle_name=${encodeURIComponent(circle)}&team_id=${teamId}&year=${year}&month=${month}&format=${format}`;
+        } else if (reportType === 'performance') {
+            endpoint = `/api/reports/squad-performance?circle_name=${encodeURIComponent(circle)}&year=${year}&month=${month}&format=${format}`;
+        } else if (reportType === 'collection') {
+            endpoint = `/api/reports/collection?circle_name=${encodeURIComponent(circle)}&year=${year}&month=${month}&format=${format}`;
+        } else if (reportType === 'load-booking') {
+            endpoint = `/api/reports/load-bookings/${format}?circle=${encodeURIComponent(circle)}`;
+        }
+
+        const a = document.createElement('a');
+        a.href = endpoint;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast(`Generating ${reportType.toUpperCase()} (${format.toUpperCase()})...`);
+    }
+</script>
+{% endblock %}

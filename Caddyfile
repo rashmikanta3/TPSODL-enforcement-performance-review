@@ -1,0 +1,7 @@
+{
+    admin off
+}
+
+enfloadbook.duckdns.org {
+    reverse_proxy fastapi-web:8000
+}
