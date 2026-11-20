@@ -105,7 +105,8 @@ def fix_postgres_sequences():
     tables = [
         "users", "team_leads", "teams", "employees", "daily_team_operations",
         "attendance", "vehicle_log_books", "vcr_masters", "load_bookings",
-        "disconnection_records", "collections"
+        "disconnection_records", "collections",
+        "pvr_uploads", "pvr_drive_folders", "pvr_audit_log"
     ]
     with engine.connect() as conn:
         for tbl in tables:

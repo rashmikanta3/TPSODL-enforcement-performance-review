@@ -139,6 +139,7 @@ const OPERATIONAL_ROUTES = [
     '/collection',
     '/vcr-desk',
     '/vcr',
+    '/pvr',
     '/admin-desk',
     '/admin',
     '/profile'
@@ -284,6 +285,7 @@ function applyViewOnlyRestrictions() {
 function logout() {
     localStorage.removeItem('tpsodl_user');
     sessionStorage.removeItem('redirect_after_login');
+    document.cookie = 'access_token=; Max-Age=0; path=/; SameSite=Lax';
     window.location.href = '/dashboard';
 }
 

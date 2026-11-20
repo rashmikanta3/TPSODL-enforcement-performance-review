@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Date,
+    Column, Integer, String, Float, Boolean, Date, DateTime,
     ForeignKey, Text, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, synonym
@@ -334,3 +334,60 @@ class Collection(Base):
         Index("idx_coll_date_team", "payment_date", "team_name"),
         Index("idx_coll_date_circle", "payment_date", "circle"),
     )
+
+
+# =========================================================================
+# 12. PVR (PHYSICAL VERIFICATION REPORT) UPLOADS - PDFs STORED IN GOOGLE DRIVE
+# =========================================================================
+class PVRUpload(Base):
+    __tablename__ = "pvr_uploads"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    pvr_date = Column(Date, index=True, nullable=False)
+    circle = Column(String(50), index=True, nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    team_lead_id = Column(Integer, ForeignKey("team_leads.id", ondelete="RESTRICT"), nullable=False)
+    team_name = Column(String(100), nullable=True)       # snapshot at upload time
+    tl_name = Column(String(100), nullable=True)         # snapshot at upload time
+    drive_file_id = Column(String(128), nullable=False, unique=True)
+    drive_folder_id = Column(String(128), nullable=True)
+    file_name = Column(String(255), nullable=False)
+    file_size = Column(Integer, nullable=True)
+    page_count = Column(Integer, nullable=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    team = relationship("Team", foreign_keys=[team_id])
+    team_lead = relationship("TeamLead", foreign_keys=[team_lead_id])
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+    updater = relationship("User", foreign_keys=[updated_by])
+
+    __table_args__ = (
+        # One PVR per team leader per day: final guard against duplicates / races
+        UniqueConstraint("pvr_date", "team_lead_id", name="uq_pvr_date_team_lead"),
+        Index("idx_pvr_date_circle", "pvr_date", "circle"),
+    )
+
+
+class PVRDriveFolder(Base):
+    """Cache of Drive folder ids by logical path (Drive allows duplicate folder names)."""
+    __tablename__ = "pvr_drive_folders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    path = Column(String(500), unique=True, nullable=False)   # e.g. "TPSODL_PVR/2026/11-November"
+    folder_id = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PVRAuditLog(Base):
+    __tablename__ = "pvr_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pvr_id = Column(Integer, index=True, nullable=True)       # no FK: rows survive PVR deletion
+    action = Column(String(20), nullable=False)               # UPLOAD / REUPLOAD / EDIT / DELETE
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    username = Column(String(50), nullable=True)
+    details = Column(Text, nullable=True)                     # JSON text
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

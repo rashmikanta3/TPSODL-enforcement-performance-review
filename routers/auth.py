@@ -5,6 +5,7 @@ from database import get_db
 from models import User
 from auth import create_access_token, get_current_actor
 from typing import Optional
+from config import settings
 
 router = APIRouter()
 
@@ -32,7 +33,10 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         "circle": user.circle or "",
         "team_id": user.team_id
     })
-    response.set_cookie(key="access_token", value=f"Bearer {token}", httponly=False)
+    response.set_cookie(
+        key="access_token", value=f"Bearer {token}", httponly=False, samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
     return {
         "success": True,

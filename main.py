@@ -23,6 +23,7 @@ from routers.collection import router as collection_router
 from routers.analytics import router as analytics_router
 from routers.reports import router as reports_router
 from routers.vcr import router as vcr_router
+from routers.pvr import router as pvr_router
 
 
 @asynccontextmanager
@@ -57,6 +58,7 @@ app.include_router(collection_router, prefix="/api/collection", tags=["Collectio
 app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
 app.include_router(vcr_router, prefix="/api/vcr", tags=["VCR"])
+app.include_router(pvr_router, prefix="/api/pvr", tags=["PVR"])
 
 # =========================================================================
 # HTML UI Page Controllers
@@ -143,6 +145,10 @@ def admin_desk(request: Request, db: Session = Depends(get_db)):
     if guard:
         return guard
     return templates.TemplateResponse(request=request, name="admin.html", context={"request": request, "active_page": "admin"})
+
+@app.get("/pvr", response_class=HTMLResponse)
+def pvr_page(request: Request):
+    return templates.TemplateResponse(request=request, name="pvr.html", context={"active_page": "pvr"})
 
 @app.get("/profile", response_class=HTMLResponse)
 def profile_page(request: Request):
