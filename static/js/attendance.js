@@ -123,6 +123,7 @@ async function onDateOrTeamChange() {
                             <option value="A">A (Absent)</option>
                             <option value="L">L (Leave)</option>
                             <option value="WO">WO (Weekly Off)</option>
+                            <option value="-">-</option>
                         </select>
                     </td>
                 </tr>

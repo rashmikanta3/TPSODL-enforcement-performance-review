@@ -31,6 +31,10 @@ RUN pip install -r requirements.txt
 # 4. Copy application source
 COPY . .
 
+# PVR spool (PDFs waiting for Google Drive); mounted as a volume in docker-compose
+RUN mkdir -p /app/spool
+
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Exactly 1 worker: the PVR background uploader is an in-process thread
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

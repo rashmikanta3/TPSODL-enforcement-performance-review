@@ -36,51 +36,24 @@ class Settings(BaseSettings):
         "NON_OPERATIONAL"
     ]
 
-    # --- PVR module: Google Drive (Apps Script Web App / Service Account / Folder ID) ---
+    # --- PVR module: Google Drive via the Apps Script Web App (apps_script/Code.gs) ---
     GOOGLE_APPS_SCRIPT_URL: str = ""
     GOOGLE_APPS_SCRIPT_SECRET: str = ""
-    GDRIVE_SERVICE_ACCOUNT_FILE: str = "tpsodl-enf.json"
-    GDRIVE_ROOT_FOLDER_ID: str = "1MjeaI7UDzuAM9wxq4IMSbm-Jm0vcWCPg"
-    GOOGLE_SERVICE_ACCOUNT_FILE: str = ""
-    GOOGLE_DRIVE_PVR_FOLDER_ID: str = ""
-    GDRIVE_FOLDER_ID: str = ""
 
-    # Legacy OAuth fallback (optional)
-    GDRIVE_CLIENT_ID: str = ""
-    GDRIVE_CLIENT_SECRET: str = ""
-    GDRIVE_REFRESH_TOKEN: str = ""
-    GDRIVE_ROOT_FOLDER_NAME: str = "TPSODL_PVR"
-
-    # --- PVR module limits ---
+    # --- PVR module limits / storage ---
     PVR_MAX_UPLOAD_MB: int = 25
     PVR_ZIP_MAX_DAYS: int = 62
     PVR_ZIP_MAX_FILES: int = 1000
+    PVR_SPOOL_DIR: str = "/app/spool"      # local queue of PDFs waiting for Drive (Docker volume)
+
+    # --- PVR PDF compression (runs in the background worker) ---
+    PVR_COMPRESS_MODE: str = "balanced"     # off | lossless | balanced
+    PVR_COMPRESS_DPI: int = 200
+    PVR_JPEG_QUALITY: int = 85
 
     @property
     def gdrive_configured(self) -> bool:
-        load_dotenv(override=True)
-        gas_url = (os.getenv("GOOGLE_APPS_SCRIPT_URL") or self.GOOGLE_APPS_SCRIPT_URL).strip()
-        gas_sec = (os.getenv("GOOGLE_APPS_SCRIPT_SECRET") or self.GOOGLE_APPS_SCRIPT_SECRET).strip()
-        if gas_url and gas_sec:
-            return True
-        sa_file = (
-            os.getenv("GDRIVE_SERVICE_ACCOUNT_FILE")
-            or os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
-            or self.GDRIVE_SERVICE_ACCOUNT_FILE
-            or self.GOOGLE_SERVICE_ACCOUNT_FILE
-            or "tpsodl-enf.json"
-        )
-        folder_id = (
-            os.getenv("GDRIVE_ROOT_FOLDER_ID")
-            or os.getenv("GOOGLE_DRIVE_PVR_FOLDER_ID")
-            or os.getenv("GDRIVE_FOLDER_ID")
-            or self.GDRIVE_ROOT_FOLDER_ID
-            or self.GOOGLE_DRIVE_PVR_FOLDER_ID
-        )
-        if os.path.exists(sa_file) and str(folder_id).strip():
-            return True
-        return bool(self.GDRIVE_CLIENT_ID.strip() and self.GDRIVE_CLIENT_SECRET.strip()
-                    and self.GDRIVE_REFRESH_TOKEN.strip())
+        return bool(self.GOOGLE_APPS_SCRIPT_URL.strip() and self.GOOGLE_APPS_SCRIPT_SECRET.strip())
 
     class Config:
         env_file = ".env"

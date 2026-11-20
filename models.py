@@ -349,11 +349,15 @@ class PVRUpload(Base):
     team_lead_id = Column(Integer, ForeignKey("team_leads.id", ondelete="RESTRICT"), nullable=False)
     team_name = Column(String(100), nullable=True)       # snapshot at upload time
     tl_name = Column(String(100), nullable=True)         # snapshot at upload time
-    drive_file_id = Column(String(128), nullable=False, unique=True)
+    drive_file_id = Column(String(128), nullable=True, unique=True)   # NULL until the worker uploads it
     drive_folder_id = Column(String(128), nullable=True)
     file_name = Column(String(255), nullable=False)
-    file_size = Column(Integer, nullable=True)
+    file_size = Column(Integer, nullable=True)            # bytes stored in Drive (after compression)
+    original_size = Column(Integer, nullable=True)        # bytes as uploaded by the user
     page_count = Column(Integer, nullable=True)
+    storage_status = Column(String(10), nullable=False, default="PENDING")  # PENDING / UPLOADED / FAILED
+    storage_error = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
     uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

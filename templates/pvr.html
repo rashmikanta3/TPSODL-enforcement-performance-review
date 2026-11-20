@@ -8,7 +8,37 @@
     .pvr-ms-menu .form-check { padding: .25rem .5rem .25rem 2rem; }
     .pvr-ms-menu .form-check:hover { background: var(--bs-tertiary-bg); }
     .pvr-pdf-frame { width: 100%; height: 75vh; border: 0; background: #525659; }
-    .pvr-pending .badge { font-weight: 500; }
+    /* ---- PVR submission tracker ---- */
+    .pvr-trk .stat { border-radius: .6rem; padding: .6rem .75rem; height: 100%; }
+    .pvr-trk .stat .num { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+    .pvr-trk .stat .lbl { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; opacity: .8; }
+    .pvr-trk .progress { height: .6rem; }
+    .pvr-trk .circle-progress { width: 70px; height: .4rem; }
+    .pvr-trk .accordion-button { padding: .55rem .85rem; gap: .5rem; }
+    .pvr-trk .accordion-button:not(.collapsed) { background: var(--bs-tertiary-bg); color: inherit; box-shadow: none; }
+    .pvr-tl { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border-radius: .5rem;
+              border: 1px solid var(--bs-border-color-translucent); border-left: 4px solid var(--trk-color, #6c757d);
+              background: var(--bs-body-bg); transition: background .15s, transform .15s, box-shadow .15s; min-width: 0; }
+    .pvr-tl:hover { background: var(--bs-tertiary-bg); transform: translateY(-1px); box-shadow: 0 .15rem .4rem rgba(0,0,0,.06); }
+    .pvr-tl .avatar { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+                      font-size: .78rem; font-weight: 700; color: #fff; background: var(--trk-color, #6c757d); }
+    .pvr-tl .meta { min-width: 0; flex: 1; }
+    .pvr-tl .meta .nm { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pvr-tl .meta .sub { font-size: .74rem; color: var(--bs-secondary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pvr-tl .call { flex: 0 0 auto; }
+    .pvr-trk .muted-list .list-group-item { font-size: .82rem; color: var(--bs-secondary-color); }
+    .pvr-skel { background: linear-gradient(90deg, var(--bs-tertiary-bg) 25%, var(--bs-secondary-bg) 50%, var(--bs-tertiary-bg) 75%);
+                background-size: 200% 100%; animation: pvrskel 1.2s infinite; border-radius: .4rem; }
+    @keyframes pvrskel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    .pvr-trk .accordion-button .cname { min-width: 0; }
+    @media (max-width: 576px) {
+        .pvr-trk .stat { padding: .5rem; }
+        .pvr-trk .stat .num { font-size: 1.3rem; }
+        .pvr-trk .stat .lbl { font-size: .64rem; }
+        .pvr-trk .trk-actions .btn { flex: 1; }
+        .pvr-trk .accordion-button { gap: .35rem; padding: .5rem .6rem; }
+        .pvr-trk .circle-progress { width: 44px; }
+    }
 </style>
 {% endblock %}
 
@@ -79,7 +109,10 @@
                                     <div class="progress" style="height: 20px;">
                                         <div class="progress-bar progress-bar-striped progress-bar-animated" id="upProgress" style="width: 0%">0%</div>
                                     </div>
-                                    <div class="small text-muted mt-1" id="upProgressText">Uploading...</div>
+                                    <div class="d-flex justify-content-between align-items-center mt-1">
+                                        <div class="small text-muted" id="upProgressText">Uploading...</div>
+                                        <button type="button" class="btn btn-link btn-sm text-danger p-0 d-none" id="btnPvrCancel"><i class="fa-solid fa-xmark me-1"></i>Cancel</button>
+                                    </div>
                                 </div>
                                 <div class="col-12">
                                     <button type="submit" class="btn btn-primary w-100 fw-semibold" id="btnPvrUpload">
@@ -118,12 +151,8 @@
             </div>
         </div>
 
-        <div class="card shadow-sm border-0 mb-3 d-none" id="vPendingCard">
-            <div class="card-body py-2 pvr-pending">
-                <div class="small fw-semibold text-secondary mb-1"><i class="fa-solid fa-hourglass-half text-warning me-1"></i>Pending (no PVR for this date): <span id="vPendingCount"></span></div>
-                <div id="vPendingList" class="d-flex flex-wrap gap-1"></div>
-            </div>
-        </div>
+        <!-- PVR submission tracker (Admin / Sub-Admin) -->
+        <div id="vTracker" class="mb-3 d-none"></div>
 
         <div class="card shadow-sm border-0">
             <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
@@ -134,9 +163,9 @@
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0 small">
                         <thead class="table-light text-secondary text-uppercase">
-                            <tr><th class="ps-3">Date</th><th>Circle</th><th>Team</th><th>Team Leader</th><th>File name</th><th>Size</th><th>Uploaded by</th><th>Uploaded at</th><th class="text-end pe-3">Actions</th></tr>
+                            <tr><th class="ps-3">Date</th><th>Circle</th><th>Team</th><th>Team Leader</th><th>File name</th><th>Size</th><th>Status</th><th>Uploaded by</th><th>Uploaded at</th><th class="text-end pe-3">Actions</th></tr>
                         </thead>
-                        <tbody id="vBody"><tr><td colspan="9" class="text-center text-muted py-4">Choose a date and click Show.</td></tr></tbody>
+                        <tbody id="vBody"><tr><td colspan="10" class="text-center text-muted py-4">Choose a date and click Show.</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -237,7 +266,7 @@
                 <input type="file" class="form-control form-control-sm" id="rFile" accept="application/pdf,.pdf">
                 <div class="form-text small" id="rFileInfo"></div>
                 <div class="progress mt-2 d-none" id="rProgressWrap" style="height: 18px;"><div class="progress-bar progress-bar-striped progress-bar-animated" id="rProgress" style="width:0%">0%</div></div>
-                <div class="alert alert-warning small mt-3 mb-0 py-2">The current PDF will be moved to Google Drive trash (recoverable for 30 days).</div>
+                <div class="alert alert-warning small mt-3 mb-0 py-2">The current PDF stays in place until the new one is saved to Google Drive, then moves to Drive trash (recoverable for 30 days).</div>
             </div>
             <div class="modal-footer py-2"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button class="btn btn-warning btn-sm fw-semibold" id="btnPvrReupload">Replace file</button></div>
         </div>
@@ -252,7 +281,7 @@
             <div class="modal-body text-center p-4">
                 <p class="fw-semibold mb-1">Delete this PVR?</p>
                 <p class="small text-muted mb-0" id="delInfo"></p>
-                <p class="small text-muted mt-2 mb-0">The PDF moves to Google Drive trash (recoverable for 30 days) and the record is removed.</p>
+                <p class="small text-muted mt-2 mb-0">The PDF moves to Google Drive trash (recoverable for 30 days) and the record is removed. An upload that is still saving is cancelled.</p>
             </div>
             <div class="modal-footer py-2"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger btn-sm" id="btnPvrDelete"><i class="fa-solid fa-trash me-1"></i>Yes, delete</button></div>
         </div>

@@ -5,9 +5,12 @@ services:
       dockerfile: Dockerfile
     container_name: tpsodl_fastapi
     restart: unless-stopped
+    # Keep --workers 1: the PVR Drive uploader runs as a thread inside this one process
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
     env_file:
       - .env
+    volumes:
+      - pvr_spool:/app/spool      # PVRs waiting for Google Drive survive restarts
     expose:
       - "8000"
     networks:
@@ -37,3 +40,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  pvr_spool:

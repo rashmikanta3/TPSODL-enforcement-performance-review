@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date
@@ -23,7 +24,18 @@ from routers.collection import router as collection_router
 from routers.analytics import router as analytics_router
 from routers.reports import router as reports_router
 from routers.vcr import router as vcr_router
-from routers.pvr import router as pvr_router
+from routers.pvr import router as pvr_router, RequestStartMiddleware
+from services import pvr_worker
+
+# Show PVR timing / worker logs (INFO) in `docker compose logs` without changing other loggers
+for _name in ("routers.pvr", "services"):
+    _log = logging.getLogger(_name)
+    _log.setLevel(logging.INFO)
+    if not _log.handlers:
+        _h = logging.StreamHandler()
+        _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        _log.addHandler(_h)
+        _log.propagate = False
 
 
 @asynccontextmanager
@@ -32,7 +44,12 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as e:
         print(f"Warning: init_db failed on startup: {e}")
+    try:
+        pvr_worker.start()          # PVR background Drive uploads (needs --workers 1)
+    except Exception as e:
+        print(f"Warning: PVR worker failed to start: {e}")
     yield
+    pvr_worker.stop()
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -44,6 +61,7 @@ app = FastAPI(
 # Static and Templates configuration
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
+app.add_middleware(RequestStartMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 

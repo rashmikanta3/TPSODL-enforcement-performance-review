@@ -68,13 +68,21 @@ async function api(url, options = {}) {
     return { ok: false, status: res.status, data, message: errorFrom(data, fallback) };
 }
 
-// multipart upload with progress (fetch has no upload progress)
+// multipart upload with progress, speed/ETA and cancel (fetch has no upload progress).
+// onProgress(pct, info) where info = {loaded, total, bps, etaSec}. Returns {promise, cancel}.
 function xhrUpload(url, formData, onProgress) {
-    return new Promise((resolve) => {
-        const xhr = new XMLHttpRequest();
+    const xhr = new XMLHttpRequest();
+    const promise = new Promise((resolve) => {
+        const started = performance.now();
         xhr.open('POST', url);
         xhr.withCredentials = true;
-        xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round(e.loaded * 100 / e.total)); };
+        xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            const secs = Math.max((performance.now() - started) / 1000, 0.001);
+            const bps = e.loaded / secs;
+            const etaSec = bps > 0 ? (e.total - e.loaded) / bps : null;
+            onProgress(Math.round(e.loaded * 100 / e.total), { loaded: e.loaded, total: e.total, bps, etaSec });
+        };
         xhr.onload = () => {
             let data = null;
             try { data = JSON.parse(xhr.responseText); } catch (e) { /* ignore */ }
@@ -83,8 +91,40 @@ function xhrUpload(url, formData, onProgress) {
             resolve({ ok, status: xhr.status, data, message: ok ? null : errorFrom(data, `Upload failed (${xhr.status}).`) });
         };
         xhr.onerror = () => resolve({ ok: false, status: 0, data: null, message: 'Network error during upload. Please try again.' });
+        xhr.onabort = () => resolve({ ok: false, status: -1, aborted: true, data: null, message: 'Upload cancelled.' });
         xhr.send(formData);
     });
+    return { promise, cancel: () => xhr.abort() };
+}
+
+function fmtSpeed(bps) {
+    if (!bps) return '';
+    return bps >= 1048576 ? `${(bps / 1048576).toFixed(1)} MB/s` : `${Math.round(bps / 1024)} KB/s`;
+}
+
+function fmtEta(sec) {
+    if (sec === null || sec === undefined || !isFinite(sec)) return '';
+    if (sec < 1) return 'less than 1s left';
+    if (sec < 60) return `${Math.ceil(sec)}s left`;
+    return `${Math.floor(sec / 60)}m ${Math.ceil(sec % 60)}s left`;
+}
+
+// "3.10 MB (from 11.80 MB)" when the stored file was compressed
+function fmtStoredSize(r) {
+    const stored = fmtBytes(r.file_size);
+    return r.original_size && r.file_size && r.original_size > r.file_size
+        ? `${stored} <span class="text-muted">(from ${fmtBytes(r.original_size)})</span>` : stored;
+}
+
+function storageBadge(r) {
+    if (r.storage_status === 'PENDING') {
+        return '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Uploaded to the portal; copying to Google Drive">⏳ Saving to Drive</span>';
+    }
+    if (r.storage_status === 'FAILED') {
+        const why = r.storage_error ? ` title="${esc(r.storage_error)}"` : '';
+        return `<span class="badge bg-danger-subtle text-danger border border-danger-subtle"${why}>❌ Failed</span>`;
+    }
+    return '<span class="badge bg-success-subtle text-success border border-success-subtle">✅ Saved</span>';
 }
 
 function setOptions(select, items, { placeholder = null, value = null } = {}) {
@@ -302,24 +342,33 @@ async function submitUpload(e) {
     btn.disabled = true;
     $('upProgressWrap').classList.remove('d-none');
     const bar = $('upProgress');
-    const setPct = (p) => {
+    const setPct = (p, info) => {
         bar.style.width = `${p}%`;
         bar.textContent = `${p}%`;
-        $('upProgressText').textContent = p < 100 ? 'Uploading...' : 'Saving to Google Drive...';
+        $('upProgressText').textContent = p < 100
+            ? ['Uploading', info && `${fmtBytes(info.loaded)} / ${fmtBytes(info.total)}`,
+               info && fmtSpeed(info.bps), info && fmtEta(info.etaSec)].filter(Boolean).join(' · ')
+            : 'Processing…';
     };
     setPct(0);
 
-    const r = await xhrUpload('/api/pvr/upload', fd, setPct);
+    const job = xhrUpload('/api/pvr/upload', fd, setPct);
+    const cancelBtn = $('btnPvrCancel');
+    cancelBtn.classList.remove('d-none');
+    cancelBtn.onclick = job.cancel;
+    const r = await job.promise;
+    cancelBtn.classList.add('d-none');
     $('upProgressWrap').classList.add('d-none');
 
     if (!r.ok) {
-        showToast(esc(r.message), 'danger');
+        if (r.aborted) showToast('Upload cancelled.', 'warning');
+        else showToast(esc(r.message), 'danger');
         if (r.status === 409) await checkDuplicate();
         else refreshUploadButton();
         return;
     }
     const p = r.data.pvr;
-    showToast(`PVR uploaded for ${esc(p.tl_name)} (${fmtDate(p.pvr_date)}).`, 'success');
+    showToast(`Uploaded ✔ – saving to Google Drive in background (${esc(p.tl_name)}, ${fmtDate(p.pvr_date)}).`, 'success');
     $('upFile').value = '';
     $('upFileInfo').textContent = 'No file selected.';
     $('upFileInfo').className = 'form-text small';
@@ -356,26 +405,28 @@ async function loadViewTls() {
         { placeholder: 'All team leaders' });
 }
 
-async function loadList() {
+async function loadList(quiet = false) {
     const date = $('vDate').value;
-    if (!date) return showToast('Please choose a date.', 'warning');
+    if (!date) return quiet ? null : showToast('Please choose a date.', 'warning');
     const params = new URLSearchParams({ date });
     if ($('vCircle').value) params.set('circle', $('vCircle').value);
     if ($('vTl').value) params.set('team_lead_id', $('vTl').value);
 
     const body = $('vBody');
     body.dataset.loaded = '1';
-    body.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</td></tr>`;
+    if (!quiet) showTrackerSkeleton();
+    if (!quiet) body.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</td></tr>`;
 
     const r = await api(`/api/pvr/list?${params}`);
     if (!r.ok) {
-        body.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4"><i class="fa-solid fa-triangle-exclamation me-2"></i>${esc(r.message)}</td></tr>`;
+        if (quiet) return;
+        body.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-4"><i class="fa-solid fa-triangle-exclamation me-2"></i>${esc(r.message)}</td></tr>`;
         return;
     }
     renderList(r.data);
 }
 
-function renderList({ rows, pending }) {
+function renderList({ rows, tracker }) {
     const body = $('vBody');
     $('vCount').textContent = `${rows.length} uploaded`;
     PVR.rows = Object.fromEntries(rows.map(r => [String(r.id), r]));
@@ -389,13 +440,16 @@ function renderList({ rows, pending }) {
             <td class="fw-medium">${esc(r.tl_name)}${r.tl_code ? ` <span class="text-muted">(${esc(r.tl_code)})</span>` : ''}</td>
             <td><i class="fa-solid fa-file-pdf text-danger me-1"></i><span title="${esc(r.file_name)}">${esc(r.file_name)}</span>
                 ${r.page_count ? `<div class="text-muted">${r.page_count} page${r.page_count === 1 ? '' : 's'}</div>` : ''}</td>
-            <td>${fmtBytes(r.file_size)}</td>
+            <td class="text-nowrap">${fmtStoredSize(r)}</td>
+            <td>${storageBadge(r)}</td>
             <td>${esc(r.uploaded_by || '-')}</td>
             <td>${fmtDateTime(r.uploaded_at)}${r.updated_at ? `<div class="text-muted">edited ${fmtDateTime(r.updated_at)}</div>` : ''}</td>
             <td class="text-end pe-3 text-nowrap">
                 <div class="btn-group btn-group-sm">
                     <button class="btn btn-outline-primary" data-act="view" data-id="${r.id}" title="View"><i class="fa-solid fa-eye"></i></button>
                     <a class="btn btn-outline-secondary" href="/api/pvr/${r.id}/file" title="Download"><i class="fa-solid fa-download"></i></a>
+                    ${isAdmin && r.storage_status === 'FAILED' ? `
+                    <button class="btn btn-outline-success" data-act="retry" data-id="${r.id}" title="Retry Drive upload"><i class="fa-solid fa-arrows-rotate"></i></button>` : ''}
                     ${isAdmin ? `
                     <button class="btn btn-outline-dark" data-act="edit" data-id="${r.id}" title="Edit"><i class="fa-solid fa-pen"></i></button>
                     <button class="btn btn-outline-warning" data-act="reupload" data-id="${r.id}" title="Re-upload"><i class="fa-solid fa-rotate"></i></button>
@@ -403,23 +457,187 @@ function renderList({ rows, pending }) {
                 </div>
             </td>
         </tr>`).join('')
-        : `<tr><td colspan="9" class="text-center text-muted py-4"><i class="fa-solid fa-folder-open me-2"></i>No PVR uploaded for these filters.</td></tr>`;
+        : `<tr><td colspan="10" class="text-center text-muted py-4"><i class="fa-solid fa-folder-open me-2"></i>No PVR uploaded for these filters.</td></tr>`;
 
     body.querySelectorAll('button[data-act]').forEach(btn => btn.addEventListener('click', () => {
         const row = PVR.rows[btn.dataset.id];
         if (!row) return;
-        ({ view: openPdf, edit: openEdit, reupload: openReupload, delete: openDelete })[btn.dataset.act](row);
+        ({ view: openPdf, edit: openEdit, reupload: openReupload, delete: openDelete, retry: retryUpload })[btn.dataset.act](row);
     }));
 
-    const card = $('vPendingCard');
-    if (pending && pending.length) {
-        $('vPendingCount').textContent = pending.length;
-        $('vPendingList').innerHTML = pending.map(p =>
-            `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="${esc(p.circle)}">${esc(tlLabel(p))}</span>`).join('');
-        card.classList.remove('d-none');
-    } else {
-        card.classList.add('d-none');
+    // While uploads are still being copied to Drive, refresh quietly so badges turn ✅
+    clearTimeout(PVR.pollTimer);
+    if (rows.some(r => r.storage_status === 'PENDING')) {
+        PVR.pollTimer = setTimeout(() => loadList(true), 4000);
     }
+
+    renderTracker(tracker);
+}
+
+// ---------------------------------------------------------------------------
+// PVR submission tracker (Admin / Sub-Admin)
+// ---------------------------------------------------------------------------
+const CIRCLE_COLORS = {
+    BERHAMPUR: '#0d6efd', CITY: '#6f42c1', ASKA: '#198754',
+    BHANJANAGAR: '#fd7e14', JEYPORE: '#d63384', RAYAGADA: '#0aa2c0',
+};
+const circleColor = (c) => CIRCLE_COLORS[c] || '#6c757d';
+
+function fmtLongDate(iso) {           // 2026-11-20 -> 20 Nov 2026
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function initials(name) {
+    const parts = String(name || '?').trim().split(/\s+/);
+    return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+function pctColor(p) { return p >= 90 ? 'success' : p >= 60 ? 'warning' : 'danger'; }
+
+function showTrackerSkeleton() {
+    const box = $('vTracker');
+    if (!box || !['ADMIN', 'SUB_ADMIN'].includes(PVR.user?.role)) return;
+    box.classList.remove('d-none');
+    box.innerHTML = `
+        <div class="card shadow-sm border-0"><div class="card-body">
+            <div class="pvr-skel mb-3" style="height:20px;width:55%"></div>
+            <div class="row g-2 mb-3">${'<div class="col-4"><div class="pvr-skel" style="height:64px"></div></div>'.repeat(3)}</div>
+            <div class="pvr-skel mb-3" style="height:10px"></div>
+            <div class="pvr-skel mb-2" style="height:44px"></div><div class="pvr-skel" style="height:44px"></div>
+        </div></div>`;
+}
+
+// Plain text for WhatsApp (*bold* is WhatsApp markdown)
+function trackerShareText(t) {
+    const lines = [`PVR pending – ${fmtLongDate(t.date)}`,
+                   `Uploaded ${t.uploaded}/${t.expected}${t.percent !== null ? ` (${t.percent}%)` : ''}`];
+    t.by_circle.filter(c => c.pending.length).forEach(c => {
+        lines.push('', `*${c.circle}* (${c.uploaded}/${c.expected} uploaded)`);
+        c.pending.forEach((p, i) => {
+            lines.push(`${i + 1}. ${p.name}${p.tl_code ? ` (${p.tl_code})` : ''} – ${p.teams.join(', ')}` +
+                       (p.contact_no ? ` – ${p.contact_no}` : ''));
+        });
+    });
+    return lines.join('\n');
+}
+
+async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (e) {               // non-HTTPS / older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } finally { ta.remove(); }
+    }
+}
+
+function renderTracker(t) {
+    const box = $('vTracker');
+    if (!box) return;
+    if (!t) { box.classList.add('d-none'); box.innerHTML = ''; return; }
+    box.classList.remove('d-none');
+    PVR.tracker = t;
+
+    const title = `<h6 class="fw-bold mb-0"><i class="fa-solid fa-clipboard-check text-primary me-2"></i>PVR Submission Tracker – ${esc(fmtLongDate(t.date))}</h6>`;
+
+    if (!t.has_operations && !t.not_entered.length) {
+        box.innerHTML = `<div class="card shadow-sm border-0"><div class="card-body text-center py-4">${title}
+            <div class="text-muted mt-3"><i class="fa-regular fa-calendar-xmark fs-2 d-block mb-2 opacity-50"></i>
+            No team operation data for this date.</div></div></div>`;
+        return;
+    }
+
+    const overdue = PVR.status && t.date < PVR.status.today;
+    const pendTone = t.pending_count === 0 ? 'success' : (overdue ? 'danger' : 'warning');
+    const pct = t.percent ?? 0;
+    const tile = (num, label, icon, tone) => `
+        <div class="col-4"><div class="stat bg-${tone}-subtle text-${tone}-emphasis border border-${tone}-subtle">
+            <div class="lbl"><i class="${icon} me-1"></i>${label}</div><div class="num">${num}</div></div></div>`;
+
+    let html = `<div class="card shadow-sm border-0 pvr-trk"><div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">${title}
+            ${t.expected ? `<span class="small text-muted">${t.uploaded} of ${t.expected} received</span>` : ''}</div>
+        <div class="row g-2 mb-3">
+            ${tile(t.expected, 'Expected', 'fa-solid fa-users', 'primary')}
+            ${tile(t.uploaded, 'Uploaded ✅', 'fa-solid fa-circle-check', 'success')}
+            ${tile(t.pending_count, `Pending ⏳${overdue && t.pending_count ? ' (late)' : ''}`, 'fa-solid fa-hourglass-half', pendTone)}
+        </div>`;
+    if (t.expected) {
+        html += `<div class="d-flex align-items-center gap-2 mb-3">
+            <div class="progress flex-grow-1" role="progressbar" aria-label="Uploaded" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar bg-${pctColor(pct)}" style="width:${pct}%"></div></div>
+            <span class="fw-semibold small text-${pctColor(pct)}-emphasis">${pct}%</span></div>`;
+    }
+
+    if (t.expected && t.pending_count === 0) {
+        html += `<div class="alert alert-success d-flex align-items-center mb-0"><span class="fs-4 me-2">🎉</span>
+                 <strong>All PVRs received for this date</strong></div>`;
+    } else if (t.expected) {
+        html += `<div class="d-flex flex-wrap gap-2 mb-3 trk-actions">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="trkCopy"><i class="fa-regular fa-copy me-1"></i>Copy list</button>
+            <button type="button" class="btn btn-sm btn-success" id="trkWa"><i class="fa-brands fa-whatsapp me-1"></i>Share on WhatsApp</button>
+        </div><div class="accordion" id="trkCircles">`;
+        t.by_circle.forEach((c, idx) => {
+            const color = circleColor(c.circle);
+            const cp = c.expected ? Math.round(100 * c.uploaded / c.expected) : 0;
+            const done = c.pending.length === 0;
+            const id = `trkC${idx}`;
+            html += `<div class="accordion-item" style="--trk-color:${color}">
+                <h2 class="accordion-header"><button class="accordion-button ${done ? 'collapsed' : ''}" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${!done}">
+                    <span class="rounded-circle d-inline-block flex-shrink-0" style="width:10px;height:10px;background:${color}"></span>
+                    <span class="fw-semibold cname text-truncate">${esc(c.circle)}</span>
+                    <span class="ms-auto d-flex align-items-center gap-2 small text-muted me-2 flex-shrink-0">
+                        <span class="d-none d-sm-inline">${c.uploaded}/${c.expected} uploaded</span>
+                        <span class="progress circle-progress"><span class="progress-bar bg-${pctColor(cp)}" style="width:${cp}%"></span></span>
+                        ${done ? '<span class="badge bg-success-subtle text-success border border-success-subtle">✔ Done</span>'
+                               : `<span class="badge bg-${overdue ? 'danger' : 'warning'} ${overdue ? '' : 'text-dark'}">${c.pending.length} pending</span>`}
+                    </span></button></h2>
+                <div id="${id}" class="accordion-collapse collapse ${done ? '' : 'show'}"><div class="accordion-body p-2">
+                    ${done ? '<div class="small text-success px-1">✔ All PVRs uploaded in this circle.</div>' : `
+                    <div class="row g-2">${c.pending.map(p => `
+                        <div class="col-12 col-md-6 col-xl-4"><div class="pvr-tl">
+                            <span class="avatar">${esc(initials(p.name))}</span>
+                            <div class="meta"><div class="nm" title="${esc(p.name)}">${esc(p.name)}
+                                ${p.tl_code ? `<span class="text-muted fw-normal small">· ${esc(p.tl_code)}</span>` : ''}</div>
+                                <div class="sub" title="${esc(p.teams.join(', '))}"><i class="fa-solid fa-people-group me-1"></i>${esc(p.teams.join(', '))}</div></div>
+                            ${p.contact_no ? `<a class="btn btn-sm btn-outline-success call" href="tel:${esc(String(p.contact_no).replace(/[^+0-9]/g, ''))}"
+                                title="Call ${esc(p.contact_no)}" aria-label="Call ${esc(p.name)}">📞</a>` : ''}
+                        </div></div>`).join('')}</div>`}
+                </div></div></div>`;
+        });
+        html += '</div>';
+    } else {
+        html += `<div class="text-muted small"><i class="fa-solid fa-circle-info me-1"></i>No team was expected to submit a PVR on this date.</div>`;
+    }
+
+    const muted = (id, icon, label, items, hint, itemHtml) => items.length ? `
+        <div class="mt-3"><a class="text-decoration-none small fw-semibold text-secondary" data-bs-toggle="collapse" href="#${id}" role="button" aria-expanded="false">
+            <i class="${icon} me-1"></i>${label} (${items.length}) <i class="fa-solid fa-chevron-down ms-1 small"></i></a>
+            <div class="collapse" id="${id}">${hint ? `<div class="small text-muted mt-1"><i class="fa-solid fa-lightbulb me-1"></i>${hint}</div>` : ''}
+                <ul class="list-group list-group-flush muted-list mt-1">${items.map(itemHtml).join('')}</ul></div></div>` : '';
+
+    html += muted('trkNotReq', 'fa-solid fa-user-slash', 'Not required today', t.not_required, '', r => `
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-1 px-1">
+            <span>${esc(r.tl_name || '—')} <span class="text-body-tertiary">· ${esc(r.team)} · ${esc(r.circle)}</span></span>
+            <span class="badge bg-secondary-subtle text-secondary border">${esc(r.reason)}</span></li>`);
+    html += muted('trkNotEnt', 'fa-solid fa-clipboard-question', 'Operation not entered', t.not_entered,
+        'Fill team operation in Attendance to track these teams.', r => `
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-1 px-1">
+            <span>${esc(r.team)} <span class="text-body-tertiary">· ${esc(r.circle)}</span></span>
+            <span class="badge bg-light text-secondary border">Default TL: ${esc(r.default_tl || '—')}</span></li>`);
+
+    box.innerHTML = html + '</div></div>';
+
+    $('trkCopy')?.addEventListener('click', async () => {
+        await copyText(trackerShareText(PVR.tracker));
+        showToast('Pending list copied. Paste it in WhatsApp.', 'success');
+    });
+    $('trkWa')?.addEventListener('click', () => {
+        window.open(`https://wa.me/?text=${encodeURIComponent(trackerShareText(PVR.tracker))}`, '_blank', 'noopener');
+    });
 }
 
 function openPdf(row) {
@@ -428,6 +646,14 @@ function openPdf(row) {
     $('pvrModalNewTab').href = `/api/pvr/${row.id}/file?inline=1`;
     $('pvrModalDownload').href = `/api/pvr/${row.id}/file`;
     PVR.modals.pvrViewModal?.show();
+}
+
+// ----- ADMIN: retry a FAILED Drive upload -----
+async function retryUpload(row) {
+    const r = await api(`/api/pvr/${row.id}/retry`, { method: 'POST' });
+    if (!r.ok) return showToast(esc(r.message), 'danger');
+    showToast('Retrying the Google Drive upload…', 'success');
+    loadList();
 }
 
 // ----- ADMIN: edit -----
@@ -479,7 +705,9 @@ async function saveEdit() {
     if (!r.ok) return showToast(esc(r.message), 'danger');
     PVR.modals.pvrEditModal?.hide();
     PVR.optionsCache = {};
-    showToast('PVR updated and the file was moved in Google Drive.', 'success');
+    showToast(r.data.pvr.storage_status === 'UPLOADED'
+        ? 'PVR updated and the file was moved in Google Drive.'
+        : 'PVR updated. It will be saved to the new Drive folder.', 'success');
     loadList();
 }
 
@@ -506,12 +734,12 @@ async function submitReupload() {
     $('rProgressWrap').classList.remove('d-none');
     const r = await xhrUpload(`/api/pvr/${reuploadRow.id}/reupload`, fd, (p) => {
         $('rProgress').style.width = `${p}%`;
-        $('rProgress').textContent = `${p}%`;
-    });
+        $('rProgress').textContent = p < 100 ? `${p}%` : 'Processing…';
+    }).promise;
     $('btnPvrReupload').disabled = false;
     if (!r.ok) return showToast(esc(r.message), 'danger');
     PVR.modals.pvrReuploadModal?.hide();
-    showToast('PVR file replaced. The old file is in Google Drive trash.', 'success');
+    showToast('New file uploaded ✔ – saving to Google Drive in background. The old file goes to Drive trash once it is saved.', 'success');
     loadList();
 }
 
@@ -667,7 +895,7 @@ async function previewDownload() {
     $('btnPvrZip').disabled = !s.count || s.over_limit || !PVR.status.drive_configured;
     $('dBody').innerHTML = s.rows.map(r => `
         <tr><td class="ps-3">${fmtDate(r.pvr_date)}</td><td>${esc(r.circle)}</td><td>${esc(r.tl_name)}</td>
-            <td>${esc(r.file_name)}</td><td class="text-end pe-3">${fmtBytes(r.file_size)}</td></tr>`).join('') +
+            <td>${esc(r.file_name)} ${r.storage_status !== 'UPLOADED' ? storageBadge(r) : ''}</td><td class="text-end pe-3">${fmtBytes(r.file_size)}</td></tr>`).join('') +
         (s.count > s.rows.length ? `<tr><td colspan="5" class="text-center text-muted small">… and ${s.count - s.rows.length} more</td></tr>` : '');
     $('dSummaryCard').classList.remove('d-none');
 }

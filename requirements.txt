@@ -40,9 +40,6 @@ python-dateutil==2.9.0.post0
 pytz==2024.2
 PyYAML==6.0.2
 
-# PVR module: Google Drive storage + PDF page count
-google-api-python-client==2.202.0
-google-auth==2.62.2
-google-auth-httplib2==0.4.4
-google-auth-oauthlib==1.2.1   # only used by scripts/gdrive_get_token.py
+# PVR module: PDF compression / page count (Drive access uses `requests` via Apps Script)
+pikepdf==9.4.2
 pypdf==5.1.0

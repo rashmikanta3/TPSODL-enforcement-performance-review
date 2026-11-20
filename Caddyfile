@@ -3,5 +3,16 @@
 }
 
 enfloadbook.duckdns.org {
-    reverse_proxy fastapi-web:8000
+    # gzip/zstd for HTML/JS/CSS/JSON (PDF and ZIP are already compressed; Caddy skips them)
+    encode zstd gzip
+
+    # PVR uploads are max 25 MB; allow some multipart overhead
+    request_body {
+        max_size 30MB
+    }
+
+    # Request bodies are streamed to the app (not buffered); flush downloads immediately
+    reverse_proxy fastapi-web:8000 {
+        flush_interval -1
+    }
 }

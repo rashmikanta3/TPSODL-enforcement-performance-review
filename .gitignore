@@ -7,7 +7,6 @@ oauth_client.json
 token.json
 tpsodl-enf.json
 client_secret*.json
-*.json
 *.db
 *.sqlite3
 .DS_Store
